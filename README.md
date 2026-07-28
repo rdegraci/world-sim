@@ -4,46 +4,40 @@ World-Sim is a Python narrative simulation project. Today, the repository provid
 
 ## Status
 
-Slices 1 and 2 are implemented. Later MVP slices still ahead.
+Slices 1–3 are implemented. Later MVP slices still ahead.
 
 ### Implemented now
 
 - Packaged CLI command: `world-sim`
-- Module entry points: `python -m world_sim` and `python -m world_sim.cli`
-- Appdir bootstrap with `platformdirs`
-- Secret loading from `.env` and tuning from `config.yaml`
-- Path-level SQLite and ChromaDB storage initialization
-- SQLite schema for users, player characters, inventories, item instances, sessions, and transcripts
-- Username onboarding / login and admin auth from `ADMIN_PASSWORD`
-- Startup logging
-- Authenticated local interactive session shell (help / whoami / quit)
+- Appdir bootstrap, `.env` / `config.yaml`, startup logging
+- Auth (signup/login + admin from `ADMIN_PASSWORD`)
+- SQLite world structure: rooms, exits, item definitions/instances, inventories, sessions, transcripts, presentation state
+- ChromaDB canonical lore by stable keys with explicit SQLite lore-key refs
+- Seeded Quiet Manor starter world
+- Grounded `play_mode` loop (context → LLM → tools → persist → reply)
+- Grok adapter by default; `WORLD_SIM_LLM=fake` for offline play/tests
 
 ### Planned MVP direction
 
-- ChromaDB collections for canonical lore
-- Provider adapters for Grok, OpenAI, and Anthropic
-- `play_mode`, admin `chat_mode`, and constrained `edit_mode`
-- A companion `world-builder` workflow for world seeding and validation
+- Admin `chat_mode` and constrained `edit_mode`
+- OpenAI / Anthropic provider expansion
+- Companion `world-builder` workflow
 - Optional WebSocket / networked clients after the local CLI runtime is solid
 
 ## Features
 
 ### Available today
 
-- Packaged CLI command: `world-sim`
-- First-run bootstrap of config and data directories
-- Required `GROK_API_KEY` validation before the session starts
-- Local signup/login for normal users with hashed passwords
-- Admin login via `ADMIN_PASSWORD` from `.env`
-- Authenticated session shell with `help`, `whoami`, and `quit`
+- Local signup/login and admin auth
+- Grounded play in the Quiet Manor (move, take, look, examine, wait)
+- Room/item full description vs stable recap presentation
+- False unsupported claims refused in-character (no invented ontology)
 
 ### Planned for later MVP slices
 
-- Grok-backed `play_mode` by default
 - Admin `chat_mode` for sandboxed NPC testing
 - Admin `edit_mode` for constrained canonical content management
-- Provider support for OpenAI, Anthropic, and Grok through an internal adapter layer
-- Canonical lore storage in ChromaDB with explicit lore-key linking from SQLite
+- Broader multi-provider support beyond Grok
 
 ## Project Structure
 
@@ -60,19 +54,15 @@ Slices 1 and 2 are implemented. Later MVP slices still ahead.
     ├── cli.py
     ├── config.py
     ├── auth/
-    │   ├── onboarding.py
-    │   └── password_utils.py
     ├── db/
-    │   ├── sqlite_manager.py
-    │   └── user_store.py
+    ├── llm/
+    ├── lore/
     ├── models/
     ├── orchestrator/
     ├── prompts/
     ├── server/
-    │   └── session_server.py
     ├── tools/
     └── utils/
-        └── logger.py
 ```
 
 ## Requirements
@@ -88,18 +78,36 @@ Clone the repository and install it in editable mode:
 pip install -e .
 ```
 
-Runtime dependencies include `platformdirs`, `python-dotenv`, and `PyYAML`. ChromaDB and LLM SDKs will be added in later slices. FastAPI/WebSockets remain deferred until after the local CLI runtime.
+Runtime dependencies include `platformdirs`, `python-dotenv`, `PyYAML`, `chromadb`, and `openai` (for the Grok-compatible API client). FastAPI/WebSockets remain deferred.
 
 ## Usage
 
-On first run, World-Sim creates platformdirs locations for the `world-sim` app, writes a default `config.yaml`, writes a `.env` template if missing, and creates SQLite/Chroma path placeholders under the data directory.
+On first run, World-Sim creates platformdirs locations for the `world-sim` app, writes a default `config.yaml`, writes a `.env` template if missing, and initializes SQLite + Chroma storage.
 
 1. Install the package (`pip install -e .`).
 2. Run `world-sim` once so bootstrap can create the app directories and `.env` template.
 3. Edit the generated `.env` and set:
-   - `GROK_API_KEY` (required)
+   - `GROK_API_KEY` (required unless using offline fake LLM)
    - `ADMIN_PASSWORD` (required only if you log in as `admin`)
 4. Run `world-sim` again.
+
+Offline / test play without calling Grok:
+
+```bash
+WORLD_SIM_LLM=fake world-sim
+```
+
+After login you start in the Quiet Manor foyer. Useful actions:
+
+```text
+look
+go north
+take brass key
+examine brass key
+go east
+wait 10
+inventory
+```
 
 ```bash
 world-sim
@@ -195,6 +203,7 @@ Default `config.yaml`:
 
 ```yaml
 provider: grok
+grok_model: grok-4.5
 logging:
   level: INFO
 ```
@@ -235,11 +244,11 @@ mypy world_sim
 ## Roadmap
 
 Completed:
-- Slice 1: local app skeleton (appdir, `.env`, `config.yaml`, storage paths, session shell)
-- Slice 2: auth and minimal structured runtime (users, player characters, sessions, transcripts, inventory)
+- Slice 1: local app skeleton
+- Slice 2: auth and minimal structured runtime
+- Slice 3: canonical lore and grounded play loop
 
 Near-term likely work:
-- Slice 3: grounded play loop with SQLite + ChromaDB lore keys
 - Slice 4: constrained admin `edit_mode`
 - Slice 5: sandboxed admin `chat_mode` and Phase 1 completion
 - later: World Builder, then networked clients / multiplayer

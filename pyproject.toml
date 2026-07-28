@@ -12,6 +12,8 @@ dependencies = [
     "platformdirs>=4.0",
     "python-dotenv>=1.0",
     "PyYAML>=6.0",
+    "chromadb>=0.5",
+    "openai>=1.40",
 ]
 
 [project.scripts]

@@ -8,18 +8,30 @@ from world_sim.auth.onboarding import AuthError, authenticate
 from world_sim.config import ConfigError, Settings, load_settings
 from world_sim.db.sqlite_manager import SqliteManager
 from world_sim.db.user_store import UserStore
+from world_sim.db.world_store import WorldStore
+from world_sim.llm.factory import create_llm_adapter
+from world_sim.lore.chroma_manager import ChromaManager
+from world_sim.lore.seed import ensure_player_starting_room, seed_starter_world
+from world_sim.orchestrator.play import PlayOrchestrator
 from world_sim.server.session_server import run_session
 from world_sim.utils.logger import get_logger, setup_logging
 
 
 def run_app(settings: Settings) -> int:
-    """Initialize SQLite, authenticate, and enter the local session loop."""
+    """Initialize storage, seed world, authenticate, and enter play."""
     logger = get_logger("cli")
     db = SqliteManager(settings.paths.sqlite_path)
     try:
         db.initialize_schema()
         store = UserStore(db.connection)
-        logger.info("SQLite schema ready at %s", settings.paths.sqlite_path)
+        world = WorldStore(db.connection)
+        lore = ChromaManager(settings.paths.chroma_dir)
+        seeded = seed_starter_world(world, lore)
+        logger.info(
+            "SQLite ready at %s; starter world seeded=%s",
+            settings.paths.sqlite_path,
+            seeded,
+        )
 
         try:
             auth = authenticate(store, admin_password=settings.admin_password)
@@ -33,13 +45,24 @@ def run_app(settings: Settings) -> int:
             print("\nAuthentication interrupted.", file=sys.stderr)
             return 130
 
+        ensure_player_starting_room(world, auth.player_character.id)
+        llm = create_llm_adapter(settings)
+        play = PlayOrchestrator(
+            world=world,
+            lore=lore,
+            llm=llm,
+            user_store=store,
+            auth=auth,
+        )
+
         logger.info(
-            "Authenticated username=%s role=%s session_id=%s",
+            "Authenticated username=%s role=%s session_id=%s room=%s",
             auth.user.username,
             auth.user.role,
             auth.session.id,
+            world.get_player_room_id(auth.player_character.id),
         )
-        return run_session(auth=auth, store=store)
+        return run_session(auth=auth, store=store, play=play)
     finally:
         db.close()
 
@@ -49,8 +72,6 @@ def main(argv: list[str] | None = None) -> None:
     del argv  # Reserved for future CLI flags.
 
     try:
-        # Configure a temporary INFO logger so bootstrap messages are visible
-        # before settings (and the configured log level) are known.
         setup_logging("INFO")
         settings = load_settings()
         setup_logging(settings.log_level)

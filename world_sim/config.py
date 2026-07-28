@@ -20,6 +20,7 @@ DEFAULT_LOG_LEVEL = "INFO"
 DEFAULT_CONFIG_YAML = """\
 # World-Sim runtime settings
 provider: grok
+grok_model: grok-4.5
 logging:
   level: INFO
 """
