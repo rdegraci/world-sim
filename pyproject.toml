@@ -8,7 +8,11 @@ version = "0.1.0"
 description = "World-Sim narrative simulation project"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "platformdirs>=4.0",
+    "python-dotenv>=1.0",
+    "PyYAML>=6.0",
+]
 
 [project.scripts]
 world-sim = "world_sim.cli:main"
