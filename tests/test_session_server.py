@@ -32,4 +32,4 @@ def test_unknown_command_is_acknowledged() -> None:
     code = run_session(input_fn=lambda _: next(inputs), output_fn=outputs.append)
 
     assert code == 0
-    assert any("not implemented yet" in line for line in outputs)
+    assert any("not wired up yet" in line for line in outputs)

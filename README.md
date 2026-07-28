@@ -4,7 +4,7 @@ World-Sim is a Python narrative simulation project. Today, the repository provid
 
 ## Status
 
-Slice 1 (local app skeleton) is implemented. Later MVP slices still ahead.
+Slices 1 and 2 are implemented. Later MVP slices still ahead.
 
 ### Implemented now
 
@@ -13,13 +13,13 @@ Slice 1 (local app skeleton) is implemented. Later MVP slices still ahead.
 - Appdir bootstrap with `platformdirs`
 - Secret loading from `.env` and tuning from `config.yaml`
 - Path-level SQLite and ChromaDB storage initialization
+- SQLite schema for users, player characters, inventories, item instances, sessions, and transcripts
+- Username onboarding / login and admin auth from `ADMIN_PASSWORD`
 - Startup logging
-- Local interactive session shell (help / quit)
+- Authenticated local interactive session shell (help / whoami / quit)
 
 ### Planned MVP direction
 
-- Username onboarding and password-based login
-- SQLite schemas for users, world, and runtime state
 - ChromaDB collections for canonical lore
 - Provider adapters for Grok, OpenAI, and Anthropic
 - `play_mode`, admin `chat_mode`, and constrained `edit_mode`
@@ -33,13 +33,12 @@ Slice 1 (local app skeleton) is implemented. Later MVP slices still ahead.
 - Packaged CLI command: `world-sim`
 - First-run bootstrap of config and data directories
 - Required `GROK_API_KEY` validation before the session starts
-- Local session shell with `help` and `quit`
+- Local signup/login for normal users with hashed passwords
+- Admin login via `ADMIN_PASSWORD` from `.env`
+- Authenticated session shell with `help`, `whoami`, and `quit`
 
 ### Planned for later MVP slices
 
-- Username onboarding and password-based login
-- SQLite-backed user and world storage schemas
-- Admin login with credentials sourced from `.env`
 - Grok-backed `play_mode` by default
 - Admin `chat_mode` for sandboxed NPC testing
 - Admin `edit_mode` for constrained canonical content management
@@ -60,7 +59,12 @@ Slice 1 (local app skeleton) is implemented. Later MVP slices still ahead.
     ├── __main__.py
     ├── cli.py
     ├── config.py
+    ├── auth/
+    │   ├── onboarding.py
+    │   └── password_utils.py
     ├── db/
+    │   ├── sqlite_manager.py
+    │   └── user_store.py
     ├── models/
     ├── orchestrator/
     ├── prompts/
@@ -84,7 +88,7 @@ Clone the repository and install it in editable mode:
 pip install -e .
 ```
 
-Runtime dependencies for Slice 1 include `platformdirs`, `python-dotenv`, and `PyYAML`. SQLite helpers, ChromaDB, and LLM SDKs will be added in later slices. FastAPI/WebSockets remain deferred until after the local CLI runtime.
+Runtime dependencies include `platformdirs`, `python-dotenv`, and `PyYAML`. ChromaDB and LLM SDKs will be added in later slices. FastAPI/WebSockets remain deferred until after the local CLI runtime.
 
 ## Usage
 
@@ -92,7 +96,9 @@ On first run, World-Sim creates platformdirs locations for the `world-sim` app, 
 
 1. Install the package (`pip install -e .`).
 2. Run `world-sim` once so bootstrap can create the app directories and `.env` template.
-3. Edit the generated `.env` and set a non-empty `GROK_API_KEY`.
+3. Edit the generated `.env` and set:
+   - `GROK_API_KEY` (required)
+   - `ADMIN_PASSWORD` (required only if you log in as `admin`)
 4. Run `world-sim` again.
 
 ```bash
@@ -106,18 +112,26 @@ python -m world_sim
 python -m world_sim.cli
 ```
 
-You should see startup logs on stderr, then a local prompt:
+Startup authenticates before the session loop:
 
 ```text
-World-Sim local session
-Type 'help' for commands, or 'quit' to exit.
-
+Sign in to World-Sim.
+Enter a username. Use 'admin' for the local admin account.
+Username: morgan
+Create password: ********
+Confirm password: ********
+World-Sim local session — signed in as morgan (player)
+...
 >
 ```
 
-Type `help` for available commands, or `quit` / `exit` to leave.
+- New usernames create an account and one linked `player_character`.
+- Existing usernames prompt for the stored password hash verification.
+- Username `admin` authenticates against `ADMIN_PASSWORD` from `.env` (not a SQLite password hash).
 
-If `GROK_API_KEY` is missing or empty, startup exits with a clear configuration error before the session loop starts.
+Type `help` for available commands, `whoami` for the current identity, or `quit` / `exit` to leave.
+
+If `GROK_API_KEY` is missing or empty, startup exits with a clear configuration error before authentication.
 
 ## Architecture Overview
 
@@ -222,9 +236,9 @@ mypy world_sim
 
 Completed:
 - Slice 1: local app skeleton (appdir, `.env`, `config.yaml`, storage paths, session shell)
+- Slice 2: auth and minimal structured runtime (users, player characters, sessions, transcripts, inventory)
 
 Near-term likely work:
-- Slice 2: onboarding and authentication
 - Slice 3: grounded play loop with SQLite + ChromaDB lore keys
 - Slice 4: constrained admin `edit_mode`
 - Slice 5: sandboxed admin `chat_mode` and Phase 1 completion
