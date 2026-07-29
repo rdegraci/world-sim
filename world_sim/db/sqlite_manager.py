@@ -122,6 +122,18 @@ CREATE TABLE IF NOT EXISTS meta_kv (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS lore_drafts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    collection_name TEXT NOT NULL,
+    proposed_key TEXT NOT NULL,
+    prompt TEXT,
+    draft_text TEXT NOT NULL,
+    status TEXT NOT NULL CHECK (status IN ('pending', 'approved', 'rejected')),
+    created_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    reviewed_at TEXT
+);
 """
 
 

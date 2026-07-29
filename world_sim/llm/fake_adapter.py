@@ -25,6 +25,19 @@ class FakeAdapter:
             if message.role == "user":
                 content = message.content.strip()
                 break
+
+        if "Create a reviewable system lore draft" in content:
+            prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
+            prompt_text = prompt_match.group(1).strip() if prompt_match else content
+            return LLMResponse(
+                text=(
+                    f"Draft system lore grounded in the Quiet Manor canon: {prompt_text}. "
+                    "The house keeps its recorded meaning carefully, and this draft "
+                    "awaits explicit admin approval before it becomes canonical."
+                ),
+                tool_calls=[],
+            )
+
         lower = content.lower()
 
         move = re.match(

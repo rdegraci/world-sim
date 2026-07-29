@@ -77,10 +77,30 @@ class ChromaManager:
         return str(documents[0])
 
     def list_keys(self, collection_name: str) -> list[str]:
+        return [key for key, _text in self.list_entries(collection_name)]
+
+    def list_entries(
+        self,
+        collection_name: str,
+        *,
+        search: str | None = None,
+    ) -> list[tuple[str, str]]:
+        """Return (key, text) pairs, optionally filtered by simple substring search."""
         if collection_name not in self._collections:
             raise ValueError(f"Unknown lore collection: {collection_name}")
-        result = self._collections[collection_name].get(include=[])
-        return list(result.get("ids") or [])
+        collection = self._collections[collection_name]
+        result = collection.get(include=["documents"])
+        ids = list(result.get("ids") or [])
+        documents = list(result.get("documents") or [])
+        entries: list[tuple[str, str]] = []
+        needle = search.strip().lower() if search else None
+        for key, document in zip(ids, documents, strict=False):
+            text = "" if document is None else str(document)
+            if needle and needle not in key.lower() and needle not in text.lower():
+                continue
+            entries.append((str(key), text))
+        entries.sort(key=lambda item: item[0])
+        return entries
 
     def get_many(
         self,

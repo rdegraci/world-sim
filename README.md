@@ -4,22 +4,21 @@ World-Sim is a Python narrative simulation project. Today, the repository provid
 
 ## Status
 
-Slices 1–3 are implemented. Later MVP slices still ahead.
+Slices 1–4 are implemented. Slice 5 still ahead.
 
 ### Implemented now
 
 - Packaged CLI command: `world-sim`
 - Appdir bootstrap, `.env` / `config.yaml`, startup logging
 - Auth (signup/login + admin from `ADMIN_PASSWORD`)
-- SQLite world structure: rooms, exits, item definitions/instances, inventories, sessions, transcripts, presentation state
-- ChromaDB canonical lore by stable keys with explicit SQLite lore-key refs
-- Seeded Quiet Manor starter world
-- Grounded `play_mode` loop (context → LLM → tools → persist → reply)
+- SQLite world structure + ChromaDB canonical lore with lore-key refs
+- Seeded Quiet Manor starter world and grounded `play_mode`
+- Admin-only `edit_mode` with constrained canon commands and review-before-save drafts
 - Grok adapter by default; `WORLD_SIM_LLM=fake` for offline play/tests
 
 ### Planned MVP direction
 
-- Admin `chat_mode` and constrained `edit_mode`
+- Admin `chat_mode` and Phase 1 completion (Slice 5)
 - OpenAI / Anthropic provider expansion
 - Companion `world-builder` workflow
 - Optional WebSocket / networked clients after the local CLI runtime is solid
@@ -31,12 +30,12 @@ Slices 1–3 are implemented. Later MVP slices still ahead.
 - Local signup/login and admin auth
 - Grounded play in the Quiet Manor (move, take, look, examine, wait)
 - Room/item full description vs stable recap presentation
+- Admin `mode edit` for system/room/item lore list/view/add and draft approve/reject
 - False unsupported claims refused in-character (no invented ontology)
 
 ### Planned for later MVP slices
 
 - Admin `chat_mode` for sandboxed NPC testing
-- Admin `edit_mode` for constrained canonical content management
 - Broader multi-provider support beyond Grok
 
 ## Project Structure
@@ -107,6 +106,21 @@ examine brass key
 go east
 wait 10
 inventory
+```
+
+Admin canon editing (after logging in as `admin`):
+
+```text
+mode edit
+create_system_lore A note about the manor's evening bell
+list_drafts
+view_draft 1
+approve_draft 1
+list_system_lore
+view_system_lore system:draft_a_note_about_the_manor_s_evening_bell
+add_room_lore foyer | The foyer smells faintly of rain-soaked coats.
+list_room_lore
+mode play
 ```
 
 ```bash
@@ -247,9 +261,9 @@ Completed:
 - Slice 1: local app skeleton
 - Slice 2: auth and minimal structured runtime
 - Slice 3: canonical lore and grounded play loop
+- Slice 4: controlled admin canon operations
 
 Near-term likely work:
-- Slice 4: constrained admin `edit_mode`
 - Slice 5: sandboxed admin `chat_mode` and Phase 1 completion
 - later: World Builder, then networked clients / multiplayer
 

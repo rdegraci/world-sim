@@ -57,6 +57,52 @@ class WorldStore:
     def connection(self) -> sqlite3.Connection:
         return self._connection
 
+    def list_rooms(self) -> list[Room]:
+        rows = self._connection.execute(
+            "SELECT * FROM rooms ORDER BY room_id"
+        ).fetchall()
+        return [
+            Room(room_id=row["room_id"], name=row["name"], lore_key=row["lore_key"])
+            for row in rows
+        ]
+
+    def find_rooms_by_lore_key(self, lore_key: str) -> list[Room]:
+        rows = self._connection.execute(
+            "SELECT * FROM rooms WHERE lore_key = ? ORDER BY room_id",
+            (lore_key,),
+        ).fetchall()
+        return [
+            Room(room_id=row["room_id"], name=row["name"], lore_key=row["lore_key"])
+            for row in rows
+        ]
+
+    def list_item_definitions(self) -> list[ItemDefinition]:
+        rows = self._connection.execute(
+            "SELECT * FROM item_definitions ORDER BY item_id"
+        ).fetchall()
+        return [
+            ItemDefinition(
+                item_id=row["item_id"],
+                name=row["name"],
+                lore_key=row["lore_key"],
+            )
+            for row in rows
+        ]
+
+    def find_item_definitions_by_lore_key(self, lore_key: str) -> list[ItemDefinition]:
+        rows = self._connection.execute(
+            "SELECT * FROM item_definitions WHERE lore_key = ? ORDER BY item_id",
+            (lore_key,),
+        ).fetchall()
+        return [
+            ItemDefinition(
+                item_id=row["item_id"],
+                name=row["name"],
+                lore_key=row["lore_key"],
+            )
+            for row in rows
+        ]
+
     def get_meta(self, key: str) -> str | None:
         row = self._connection.execute(
             "SELECT value FROM meta_kv WHERE key = ?",

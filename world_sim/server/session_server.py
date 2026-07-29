@@ -7,18 +7,20 @@ from collections.abc import Callable
 
 from world_sim.db.user_store import UserStore
 from world_sim.models import AuthContext
+from world_sim.orchestrator.edit import EditAccessError, EditOrchestrator
 from world_sim.orchestrator.play import PlayOrchestrator
 from world_sim.utils.logger import get_logger
 
-HELP_TEXT = """\
+PLAY_HELP = """\
 Commands:
-  help     Show this help text
-  whoami   Show the authenticated user and player character
-  look     Look at the current room (full canonical description)
-  inventory
-           List carried items
-  quit     Exit World-Sim
-  exit     Exit World-Sim
+  help       Show this help text
+  whoami     Show the authenticated user and player character
+  mode play  Stay in / return to play_mode
+  mode edit  Enter admin-only edit_mode (admin only)
+  look       Look at the current room (full canonical description)
+  inventory  List carried items
+  quit       Exit World-Sim
+  exit       Exit World-Sim
 
 Other lines are treated as play_mode actions (move, take, examine, wait, ...).
 """
@@ -32,6 +34,7 @@ def run_session(
     auth: AuthContext | None = None,
     store: UserStore | None = None,
     play: PlayOrchestrator | None = None,
+    edit: EditOrchestrator | None = None,
     input_fn: InputFn = input,
     output_fn: OutputFn = print,
 ) -> int:
@@ -40,6 +43,8 @@ def run_session(
     Returns an exit code suitable for ``sys.exit``.
     """
     logger = get_logger("session")
+    mode = "play"
+
     if auth is not None:
         output_fn(
             f"World-Sim local session — signed in as {auth.user.username} "
@@ -77,7 +82,8 @@ def run_session(
     try:
         while True:
             try:
-                raw = input_fn("> ")
+                prompt = "edit> " if mode == "edit" else "> "
+                raw = input_fn(prompt)
             except EOFError:
                 output_fn("")
                 output_fn("Goodbye.")
@@ -101,7 +107,10 @@ def run_session(
                 exit_code = 0
                 break
             if command in {"help", "?"}:
-                output_fn(HELP_TEXT)
+                if mode == "edit" and edit is not None:
+                    output_fn(edit.handle("help").message)
+                else:
+                    output_fn(PLAY_HELP)
                 continue
             if command == "whoami":
                 if auth is None:
@@ -111,8 +120,31 @@ def run_session(
                         f"user={auth.user.username} role={auth.user.role} "
                         f"user_id={auth.user.id} "
                         f"player_character_id={auth.player_character.id} "
-                        f"session_id={auth.session.id}"
+                        f"session_id={auth.session.id} mode={mode}"
                     )
+                continue
+            if command.startswith("mode "):
+                target = command.split(maxsplit=1)[1].strip()
+                if target == "play":
+                    mode = "play"
+                    output_fn("Switched to play_mode.")
+                    continue
+                if target == "edit":
+                    if auth is None or not auth.is_admin:
+                        output_fn(
+                            "edit_mode is admin-only. "
+                            "Non-admin users cannot access canon operations."
+                        )
+                        continue
+                    if edit is None:
+                        output_fn("edit_mode is not available in this session.")
+                        continue
+                    mode = "edit"
+                    output_fn(
+                        "Switched to edit_mode. Type 'help' for constrained canon commands."
+                    )
+                    continue
+                output_fn("Unknown mode. Use 'mode play' or 'mode edit'.")
                 continue
             if command == "inventory":
                 if play is None:
@@ -124,6 +156,20 @@ def run_session(
                 else:
                     for item in items:
                         output_fn(f"- #{item.id} {item.name}")
+                continue
+
+            if mode == "edit":
+                if edit is None:
+                    output_fn("edit_mode is not available in this session.")
+                    continue
+                try:
+                    result = edit.handle(line)
+                except EditAccessError as exc:
+                    output_fn(str(exc))
+                    mode = "play"
+                    continue
+                output_fn(result.message)
+                _record("assistant", result.message)
                 continue
 
             if play is not None:

@@ -19,3 +19,8 @@ def compose_play_system_prompt() -> str:
     if core_path.exists() and play_path.exists():
         return f"{load_prompt_file('core')}\n\n{load_prompt_file('play_mode')}"
     return load_prompt_file("system_prompt")
+
+
+def compose_edit_system_prompt() -> str:
+    """Compose core + edit_mode overlay."""
+    return f"{load_prompt_file('core')}\n\n{load_prompt_file('edit_mode')}"

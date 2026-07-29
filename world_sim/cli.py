@@ -6,25 +6,28 @@ import sys
 
 from world_sim.auth.onboarding import AuthError, authenticate
 from world_sim.config import ConfigError, Settings, load_settings
+from world_sim.db.draft_store import DraftStore
 from world_sim.db.sqlite_manager import SqliteManager
 from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import WorldStore
 from world_sim.llm.factory import create_llm_adapter
 from world_sim.lore.chroma_manager import ChromaManager
 from world_sim.lore.seed import ensure_player_starting_room, seed_starter_world
+from world_sim.orchestrator.edit import EditOrchestrator
 from world_sim.orchestrator.play import PlayOrchestrator
 from world_sim.server.session_server import run_session
 from world_sim.utils.logger import get_logger, setup_logging
 
 
 def run_app(settings: Settings) -> int:
-    """Initialize storage, seed world, authenticate, and enter play."""
+    """Initialize storage, seed world, authenticate, and enter play/edit session."""
     logger = get_logger("cli")
     db = SqliteManager(settings.paths.sqlite_path)
     try:
         db.initialize_schema()
         store = UserStore(db.connection)
         world = WorldStore(db.connection)
+        drafts = DraftStore(db.connection)
         lore = ChromaManager(settings.paths.chroma_dir)
         seeded = seed_starter_world(world, lore)
         logger.info(
@@ -54,6 +57,13 @@ def run_app(settings: Settings) -> int:
             user_store=store,
             auth=auth,
         )
+        edit = EditOrchestrator(
+            world=world,
+            lore=lore,
+            drafts=drafts,
+            llm=llm,
+            auth=auth,
+        )
 
         logger.info(
             "Authenticated username=%s role=%s session_id=%s room=%s",
@@ -62,7 +72,7 @@ def run_app(settings: Settings) -> int:
             auth.session.id,
             world.get_player_room_id(auth.player_character.id),
         )
-        return run_session(auth=auth, store=store, play=play)
+        return run_session(auth=auth, store=store, play=play, edit=edit)
     finally:
         db.close()
 
