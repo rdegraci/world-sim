@@ -26,6 +26,10 @@ grok_model: grok-4.5
 chat_npc_id: mrs_hale
 logging:
   level: INFO
+world:
+  dynamic_expansion: false
+  max_new_rooms_per_session: 5
+  require_brief_or_stub: true
 """
 
 DEFAULT_ENV_TEMPLATE = """\
@@ -54,6 +58,15 @@ class AppPaths:
 
 
 @dataclass(frozen=True)
+class WorldExpansionSettings:
+    """Optional dynamic frontier expansion (Phase 2d). Default off."""
+
+    dynamic_expansion: bool = False
+    max_new_rooms_per_session: int = 5
+    require_brief_or_stub: bool = True
+
+
+@dataclass(frozen=True)
 class Settings:
     """Effective runtime settings after bootstrap and validation."""
 
@@ -65,6 +78,7 @@ class Settings:
     anthropic_api_key: str | None
     admin_password: str | None
     raw_config: dict[str, Any]
+    world: WorldExpansionSettings = WorldExpansionSettings()
 
 
 def resolve_paths(
@@ -219,6 +233,8 @@ def validate_and_build_settings(
             f"Unknown provider '{provider}'. Supported: grok, openai, anthropic."
         )
 
+    world_settings = parse_world_expansion_settings(raw_config)
+
     return Settings(
         paths=paths,
         provider=provider,
@@ -228,6 +244,38 @@ def validate_and_build_settings(
         anthropic_api_key=anthropic_api_key,
         admin_password=admin_password,
         raw_config=raw_config,
+        world=world_settings,
+    )
+
+
+def parse_world_expansion_settings(raw_config: dict[str, Any]) -> WorldExpansionSettings:
+    """Parse world.* expansion settings; defaults keep campaigns fixed."""
+    section = raw_config.get("world") or {}
+    if section is None:
+        section = {}
+    if not isinstance(section, dict):
+        raise ConfigError("config.yaml key 'world' must be a mapping.")
+
+    dynamic = bool(section.get("dynamic_expansion", False))
+    require_stub = section.get("require_brief_or_stub", True)
+    if require_stub is None:
+        require_stub = True
+    require_stub = bool(require_stub)
+
+    max_rooms = section.get("max_new_rooms_per_session", 5)
+    try:
+        max_rooms_int = int(max_rooms)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(
+            "world.max_new_rooms_per_session must be an integer."
+        ) from exc
+    if max_rooms_int < 0:
+        raise ConfigError("world.max_new_rooms_per_session must be >= 0.")
+
+    return WorldExpansionSettings(
+        dynamic_expansion=dynamic,
+        max_new_rooms_per_session=max_rooms_int,
+        require_brief_or_stub=require_stub,
     )
 
 

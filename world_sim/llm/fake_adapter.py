@@ -99,17 +99,26 @@ class FakeAdapter:
         lower = content.lower()
 
         move = re.match(
-            r"^(?:go|walk|move)\s+(north|south|east|west)$",
+            r"^(?:go|walk|move)\s+(north|south|east|west|up|down|n|s|e|w|u|d)$",
             lower,
-        ) or re.fullmatch(r"(north|south|east|west)", lower)
+        ) or re.fullmatch(r"(north|south|east|west|up|down|n|s|e|w|u|d)", lower)
         if move:
+            aliases = {
+                "n": "north",
+                "s": "south",
+                "e": "east",
+                "w": "west",
+                "u": "up",
+                "d": "down",
+            }
+            direction = aliases.get(move.group(1), move.group(1))
             return LLMResponse(
                 text="",
                 tool_calls=[
                     ToolCall(
                         id=str(uuid4()),
                         name="move_player",
-                        arguments={"direction": move.group(1)},
+                        arguments={"direction": direction},
                     )
                 ],
             )

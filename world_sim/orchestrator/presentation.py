@@ -36,6 +36,7 @@ def present_room(
     player_character_id: int,
     room_id: str,
     force_full: bool = False,
+    show_pending_stubs: bool = False,
 ) -> str:
     room = world.get_room(room_id)
     if room is None:
@@ -56,9 +57,14 @@ def present_room(
         mode = "recap"
 
     exits = world.list_exits(room_id)
+    exit_labels = list(sorted(exits))
+    if show_pending_stubs:
+        for direction in sorted(world.list_pending_stub_directions(room_id)):
+            if direction not in exits:
+                exit_labels.append(f"{direction} (frontier)")
     items = world.list_items_in_room(room_id)
     npcs = world.list_npcs_in_room(room_id)
-    exit_text = ", ".join(sorted(exits)) if exits else "none"
+    exit_text = ", ".join(exit_labels) if exit_labels else "none"
     if items:
         item_text = ", ".join(
             f"{item.name or 'item'} (#{item.id})" for item in items

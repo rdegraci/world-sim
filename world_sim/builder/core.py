@@ -233,3 +233,56 @@ class BuilderSession:
                 preview = " ".join(text.split())[:80]
                 rows.append((resolved, key, preview))
         return rows
+
+    def add_frontier_stub(
+        self,
+        *,
+        from_room_id: str,
+        direction: str,
+        target_room_id: str,
+        lore_key: str,
+        target_name: str | None = None,
+        return_direction: str | None = None,
+        stub_id: str | None = None,
+    ) -> str:
+        """Register a prepared unrealized exit (does not create the room yet)."""
+        from world_sim.builder.linking import display_name_from_id, lore_exists
+
+        if self.world.get_room(from_room_id) is None:
+            raise ValueError(f"From-room '{from_room_id}' does not exist.")
+        if not lore_exists(self.lore, lore_key):
+            raise ValueError(
+                f"Approved lore '{lore_key}' missing. upsert_lore first "
+                "(fail closed — stubs must bind to existing canon)."
+            )
+        resolved_id = stub_id or f"stub_{from_room_id}_{direction}_{target_room_id}"
+        name = target_name or display_name_from_id(target_room_id)
+        stub = self.world.upsert_frontier_stub(
+            stub_id=resolved_id,
+            from_room_id=from_room_id,
+            direction=direction,
+            target_room_id=target_room_id,
+            target_name=name,
+            lore_key=lore_key,
+            return_direction=return_direction,
+        )
+        return (
+            f"Frontier stub pending: {stub.stub_id} "
+            f"({stub.from_room_id} --{stub.direction}--> {stub.target_room_id}, "
+            f"lore={stub.lore_key}). "
+            "Enable world.dynamic_expansion to realize on cross."
+        )
+
+    def list_frontier_stubs(self, *, status: str | None = None) -> str:
+        stubs = self.world.list_frontier_stubs(status=status)
+        if not stubs:
+            return "(no frontier stubs)"
+        lines = ["Frontier stubs:"]
+        for stub in stubs:
+            ret = f", return={stub.return_direction}" if stub.return_direction else ""
+            lines.append(
+                f"- [{stub.status}] {stub.stub_id}: "
+                f"{stub.from_room_id} --{stub.direction}--> {stub.target_room_id} "
+                f"({stub.target_name}) lore={stub.lore_key}{ret}"
+            )
+        return "\n".join(lines)

@@ -31,6 +31,18 @@ class NpcRecord:
 
 
 @dataclass(frozen=True)
+class FrontierStub:
+    stub_id: str
+    from_room_id: str
+    direction: str
+    target_room_id: str
+    target_name: str
+    lore_key: str
+    return_direction: str | None = None
+    status: str = "pending"
+
+
+@dataclass(frozen=True)
 class ItemInstanceRecord:
     id: int
     item_definition_id: str | None
@@ -797,3 +809,180 @@ class WorldStore:
                 """,
                 (npc_id,),
             )
+
+    def upsert_frontier_stub(
+        self,
+        *,
+        stub_id: str,
+        from_room_id: str,
+        direction: str,
+        target_room_id: str,
+        target_name: str,
+        lore_key: str,
+        return_direction: str | None = None,
+    ) -> FrontierStub:
+        direction_norm = direction.strip().lower()
+        return_norm = (
+            return_direction.strip().lower() if return_direction else None
+        )
+        if self.get_room(from_room_id) is None:
+            raise ValueError(f"Unknown from_room_id '{from_room_id}'.")
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO frontier_stubs (
+                    stub_id, from_room_id, direction, target_room_id,
+                    target_name, lore_key, return_direction, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')
+                ON CONFLICT(stub_id) DO UPDATE SET
+                    from_room_id = excluded.from_room_id,
+                    direction = excluded.direction,
+                    target_room_id = excluded.target_room_id,
+                    target_name = excluded.target_name,
+                    lore_key = excluded.lore_key,
+                    return_direction = excluded.return_direction,
+                    status = 'pending',
+                    realized_at = NULL
+                """,
+                (
+                    stub_id,
+                    from_room_id,
+                    direction_norm,
+                    target_room_id,
+                    target_name,
+                    lore_key,
+                    return_norm,
+                ),
+            )
+        stub = self.get_frontier_stub(stub_id)
+        if stub is None:
+            raise RuntimeError("Failed to load frontier stub.")
+        return stub
+
+    def get_frontier_stub(self, stub_id: str) -> FrontierStub | None:
+        row = self._connection.execute(
+            "SELECT * FROM frontier_stubs WHERE stub_id = ?",
+            (stub_id,),
+        ).fetchone()
+        return self._stub_from_row(row) if row else None
+
+    def get_pending_stub(
+        self,
+        from_room_id: str,
+        direction: str,
+    ) -> FrontierStub | None:
+        direction_norm = direction.strip().lower()
+        row = self._connection.execute(
+            """
+            SELECT * FROM frontier_stubs
+            WHERE from_room_id = ? AND direction = ? AND status = 'pending'
+            """,
+            (from_room_id, direction_norm),
+        ).fetchone()
+        return self._stub_from_row(row) if row else None
+
+    def list_frontier_stubs(self, *, status: str | None = None) -> list[FrontierStub]:
+        if status is None:
+            rows = self._connection.execute(
+                "SELECT * FROM frontier_stubs ORDER BY from_room_id, direction"
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                """
+                SELECT * FROM frontier_stubs
+                WHERE status = ?
+                ORDER BY from_room_id, direction
+                """,
+                (status,),
+            ).fetchall()
+        return [self._stub_from_row(row) for row in rows]
+
+    def list_pending_stub_directions(self, from_room_id: str) -> dict[str, str]:
+        """Return direction -> target_room_id for pending stubs from a room."""
+        rows = self._connection.execute(
+            """
+            SELECT direction, target_room_id FROM frontier_stubs
+            WHERE from_room_id = ? AND status = 'pending'
+            ORDER BY direction
+            """,
+            (from_room_id,),
+        ).fetchall()
+        return {
+            str(row["direction"]): str(row["target_room_id"]) for row in rows
+        }
+
+    def mark_stub_realized(self, stub_id: str) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE frontier_stubs
+                SET status = 'realized',
+                    realized_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                WHERE stub_id = ?
+                """,
+                (stub_id,),
+            )
+
+    def append_runtime_event(self, event_type: str, payload: dict) -> int:
+        import json
+
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO runtime_events (event_type, payload_json)
+                VALUES (?, ?)
+                """,
+                (event_type, json.dumps(payload, sort_keys=True)),
+            )
+            return int(cursor.lastrowid)
+
+    def list_runtime_events(
+        self,
+        *,
+        event_type: str | None = None,
+        limit: int = 50,
+    ) -> list[tuple[int, str, str, str]]:
+        if event_type:
+            rows = self._connection.execute(
+                """
+                SELECT id, event_type, payload_json, created_at
+                FROM runtime_events
+                WHERE event_type = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (event_type, limit),
+            ).fetchall()
+        else:
+            rows = self._connection.execute(
+                """
+                SELECT id, event_type, payload_json, created_at
+                FROM runtime_events
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [
+            (
+                int(row["id"]),
+                str(row["event_type"]),
+                str(row["payload_json"]),
+                str(row["created_at"]),
+            )
+            for row in rows
+        ]
+
+    @staticmethod
+    def _stub_from_row(row: object) -> FrontierStub:
+        return FrontierStub(
+            stub_id=str(row["stub_id"]),  # type: ignore[index]
+            from_room_id=str(row["from_room_id"]),  # type: ignore[index]
+            direction=str(row["direction"]),  # type: ignore[index]
+            target_room_id=str(row["target_room_id"]),  # type: ignore[index]
+            target_name=str(row["target_name"]),  # type: ignore[index]
+            lore_key=str(row["lore_key"]),  # type: ignore[index]
+            return_direction=row["return_direction"],  # type: ignore[index]
+            status=str(row["status"]),  # type: ignore[index]
+        )

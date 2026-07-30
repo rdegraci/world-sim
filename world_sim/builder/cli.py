@@ -39,6 +39,8 @@ Commands:
   preview_seed_plan [plan_id]
   validate_world [--plan plan_id] [--world-only]
   apply_seed_plan [plan_id] [--yes]
+  add_frontier_stub <from> <direction> --to <room_id> --lore <lore_key> [--name Name] [--return dir]
+  list_frontier_stubs [pending|realized]
   quit | exit
 """
 
@@ -263,6 +265,28 @@ def dispatch(session: BuilderSession, command: str, args: list[str]) -> str:
         plan = session.apply(target)
         return f"Applied {plan.plan_id}. World-Sim play can use the new structure."
 
+    if command == "add_frontier_stub":
+        keys, options = _split_options(args)
+        if len(keys) != 2 or "to" not in options or "lore" not in options:
+            raise ValueError(
+                "Usage: add_frontier_stub <from> <direction> "
+                "--to <room_id> --lore <lore_key> [--name Name] [--return dir]"
+            )
+        return session.add_frontier_stub(
+            from_room_id=keys[0],
+            direction=keys[1],
+            target_room_id=options["to"],
+            lore_key=options["lore"],
+            target_name=options.get("name"),
+            return_direction=options.get("return"),
+        )
+
+    if command == "list_frontier_stubs":
+        status = args[0] if args else None
+        if status and status not in {"pending", "realized"}:
+            raise ValueError("Usage: list_frontier_stubs [pending|realized]")
+        return session.list_frontier_stubs(status=status)
+
     raise ValueError(f"Unknown command: {command}. Type 'help'.")
 
 
@@ -278,6 +302,12 @@ def _split_options(args: list[str]) -> tuple[list[str], dict[str, str]]:
             options["npc_id"] = tokens.pop(0)
         elif token == "--name" and tokens:
             options["name"] = tokens.pop(0)
+        elif token == "--to" and tokens:
+            options["to"] = tokens.pop(0)
+        elif token == "--lore" and tokens:
+            options["lore"] = tokens.pop(0)
+        elif token == "--return" and tokens:
+            options["return"] = tokens.pop(0)
         elif token.startswith("--"):
             raise ValueError(f"Unknown option: {token}")
         else:

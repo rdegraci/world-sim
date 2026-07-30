@@ -158,6 +158,28 @@ CREATE TABLE IF NOT EXISTS npc_presentation_state (
     stable_recap TEXT,
     PRIMARY KEY (player_character_id, npc_id)
 );
+
+CREATE TABLE IF NOT EXISTS frontier_stubs (
+    stub_id TEXT PRIMARY KEY,
+    from_room_id TEXT NOT NULL REFERENCES rooms(room_id) ON DELETE CASCADE,
+    direction TEXT NOT NULL,
+    target_room_id TEXT NOT NULL,
+    target_name TEXT NOT NULL,
+    lore_key TEXT NOT NULL,
+    return_direction TEXT,
+    status TEXT NOT NULL DEFAULT 'pending'
+        CHECK (status IN ('pending', 'realized')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    realized_at TEXT,
+    UNIQUE (from_room_id, direction)
+);
+
+CREATE TABLE IF NOT EXISTS runtime_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    event_type TEXT NOT NULL,
+    payload_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
 """
 
 

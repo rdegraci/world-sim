@@ -32,7 +32,12 @@ class ContextBuilder:
         self.world = world
         self.lore = lore
 
-    def build(self, player_character_id: int) -> PlayContext:
+    def build(
+        self,
+        player_character_id: int,
+        *,
+        include_frontier_stubs: bool = False,
+    ) -> PlayContext:
         system_lore = self.lore.get_lore(COLLECTION_SYSTEM, SYSTEM_LORE_KEY)
         room_id = self.world.get_player_room_id(player_character_id)
         room_presentation_hint = None
@@ -49,6 +54,15 @@ class ContextBuilder:
                 else None
             )
             exits = self.world.list_exits(room_id)
+            exit_lines = [f"- {direction} -> {target}" for direction, target in sorted(exits.items())]
+            if include_frontier_stubs:
+                pending = self.world.list_pending_stub_directions(room_id)
+                for direction, target in sorted(pending.items()):
+                    if direction not in exits:
+                        exit_lines.append(
+                            f"- {direction} -> {target} "
+                            "(pending frontier stub; call move_player to realize/cross)"
+                        )
             items = self.world.list_items_in_room(room_id)
             item_lines = []
             for item in items:
@@ -61,12 +75,14 @@ class ContextBuilder:
                     f"- #{item.id} {item.name}: lore_key={item.definition_key}; "
                     f"canon_present={bool(item_lore)}"
                 )
+            exits_block = "\n".join(exit_lines) if exit_lines else "- none"
             room_block = (
                 f"Room id={room_id} name={room.name if room else '?'}\n"
                 f"Room lore_key={room.lore_key if room else '?'}\n"
                 f"Room lore text:\n{lore_text or '(missing)'}\n"
                 f"Presentation hint: {room_presentation_hint}\n"
-                f"Exits: {exits}\n"
+                f"Exits (authoritative; use move_player for these directions):\n"
+                f"{exits_block}\n"
                 f"Items in room:\n"
                 + ("\n".join(item_lines) if item_lines else "- none")
             )
@@ -82,6 +98,12 @@ class ContextBuilder:
             inventory_summary = "- empty"
 
         minutes = self.world.get_minutes_elapsed()
+        frontier_note = ""
+        if include_frontier_stubs:
+            frontier_note = (
+                " Pending frontier exits are valid move_player targets when listed; "
+                "do not narrate them as solid walls."
+            )
         text = (
             "AUTHORITATIVE RUNTIME CONTEXT (SQLite first, then linked lore)\n"
             f"Player character id: {player_character_id}\n"
@@ -93,6 +115,7 @@ class ContextBuilder:
             "Rules reminder: do not invent unsupported exits, items, or rooms. "
             "Use tools for movement, taking items, looking, examining, and time. "
             "False player assertions must be refused in-character."
+            f"{frontier_note}"
         )
         return PlayContext(
             player_character_id=player_character_id,

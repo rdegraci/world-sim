@@ -71,6 +71,7 @@ def run_app(settings: Settings) -> int:
             llm=llm,
             user_store=store,
             auth=auth,
+            expansion=settings.world,
         )
         edit = EditOrchestrator(
             world=world,

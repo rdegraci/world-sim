@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from world_sim.builder.realize import RealizeError, realize_adjacent
+from world_sim.config import WorldExpansionSettings
 from world_sim.db.world_store import WorldStore
 from world_sim.lore.chroma_manager import (
     COLLECTION_ITEM,
@@ -25,6 +27,28 @@ class ToolResult:
     data: dict[str, Any] | None = None
 
 
+_DIRECTION_ALIASES = {
+    "n": "north",
+    "s": "south",
+    "e": "east",
+    "w": "west",
+    "u": "up",
+    "d": "down",
+    "north": "north",
+    "south": "south",
+    "east": "east",
+    "west": "west",
+    "up": "up",
+    "down": "down",
+}
+
+
+def normalize_direction(direction: str) -> str | None:
+    """Map common direction aliases to canonical exit keys."""
+    key = direction.strip().lower()
+    return _DIRECTION_ALIASES.get(key)
+
+
 class PlayTools:
     """Validated mutation/presentation tools for play_mode."""
 
@@ -34,10 +58,13 @@ class PlayTools:
         lore: ChromaManager,
         *,
         player_character_id: int,
+        expansion: WorldExpansionSettings | None = None,
     ) -> None:
         self.world = world
         self.lore = lore
         self.player_character_id = player_character_id
+        self.expansion = expansion or WorldExpansionSettings()
+        self.realized_this_session = 0
         self._handlers: dict[str, Callable[[dict[str, Any]], ToolResult]] = {
             "move_player": self.move_player,
             "take_item": self.take_item,
@@ -57,13 +84,42 @@ class PlayTools:
             # In-character refusal style; no raw DB error copy.
             return ToolResult(ok=False, message=str(exc))
 
+    def _present(self, room_id: str, *, force_full: bool = False) -> str:
+        return present_room(
+            self.world,
+            self.lore,
+            player_character_id=self.player_character_id,
+            room_id=room_id,
+            force_full=force_full,
+            show_pending_stubs=self.expansion.dynamic_expansion,
+        )
+
     def move_player(self, arguments: dict[str, Any]) -> ToolResult:
         direction = str(arguments.get("direction", "")).strip()
         if not direction:
             return ToolResult(ok=False, message="You need a direction to move.")
-        try:
-            room = self.world.move_player(self.player_character_id, direction)
-        except ValueError:
+        direction_norm = normalize_direction(direction)
+        if direction_norm is None:
+            return ToolResult(
+                ok=False,
+                message="That is not a direction the manor understands.",
+            )
+        current = self.world.get_player_room_id(self.player_character_id)
+        if current is None:
+            return ToolResult(ok=False, message="You are not placed in the world.")
+
+        exits = self.world.list_exits(current)
+        if direction_norm in exits:
+            room = self.world.move_player(self.player_character_id, direction_norm)
+            text = self._present(room.room_id)
+            return ToolResult(
+                ok=True,
+                message=f"You go {direction_norm}.\n\n{text}",
+                data={"room_id": room.room_id},
+            )
+
+        stub = self.world.get_pending_stub(current, direction_norm)
+        if stub is None:
             return ToolResult(
                 ok=False,
                 message=(
@@ -71,17 +127,43 @@ class PlayTools:
                     "The manor keeps its present doors and no others."
                 ),
             )
-        text = present_room(
-            self.world,
-            self.lore,
-            player_character_id=self.player_character_id,
-            room_id=room.room_id,
-            force_full=False,
-        )
+
+        if not self.expansion.dynamic_expansion:
+            return ToolResult(
+                ok=False,
+                message=(
+                    "That way is sealed for now. A frontier edge waits here, but "
+                    "dynamic expansion is off — the campaign stays fixed."
+                ),
+            )
+
+        try:
+            realize_adjacent(
+                self.world,
+                self.lore,
+                stub,
+                settings=self.expansion,
+                realized_this_session=self.realized_this_session,
+            )
+        except RealizeError as exc:
+            return ToolResult(
+                ok=False,
+                message=(
+                    f"You press toward that way, but the house will not open it. "
+                    f"({exc})"
+                ),
+            )
+
+        self.realized_this_session += 1
+        room = self.world.move_player(self.player_character_id, direction_norm)
+        text = self._present(room.room_id, force_full=True)
         return ToolResult(
             ok=True,
-            message=f"You go {direction.lower()}.\n\n{text}",
-            data={"room_id": room.room_id},
+            message=(
+                f"The way {direction_norm} settles into a lasting passage.\n"
+                f"You go {direction_norm}.\n\n{text}"
+            ),
+            data={"room_id": room.room_id, "realized_stub": stub.stub_id},
         )
 
     def take_item(self, arguments: dict[str, Any]) -> ToolResult:
@@ -126,13 +208,7 @@ class PlayTools:
         room_id = self.world.get_player_room_id(self.player_character_id)
         if room_id is None:
             return ToolResult(ok=False, message="There is no room to look at.")
-        text = present_room(
-            self.world,
-            self.lore,
-            player_character_id=self.player_character_id,
-            room_id=room_id,
-            force_full=True,
-        )
+        text = self._present(room_id, force_full=True)
         return ToolResult(ok=True, message=text, data={"room_id": room_id})
 
     def examine_item(self, arguments: dict[str, Any]) -> ToolResult:

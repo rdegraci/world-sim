@@ -17,6 +17,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - World Builder companion: propose / preview / validate / apply (+ `propose_from_brief`)
 - Richer admin `edit_mode`: `create_room_lore` / `create_item_lore` / `create_npc` drafts, list filters, delete guards
 - Focused in-play Player Chat (`talk to <npc>` / `end_chat`) — conversation-only
+- Optional dynamic frontier expansion (`world.dynamic_expansion`, default off) with campaign identity
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
@@ -25,7 +26,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Broad CRUD / large-scale world editing beyond Builder + edit_mode
 - Advanced memory and broad semantic retrieval
 - Player Chat inventory handoff / barter
-- Dynamic frontier expansion; unsupervised Builder apply (Exp-007)
+- Unsupervised Builder apply (Exp-007); dig-style room features (Exp-001)
 
 ## Project Structure
 
@@ -275,9 +276,37 @@ examine oil lantern
 
 If the brief names lore keys that are not in Chroma, Builder fails closed (gaps on the plan; validate/apply refuse). Approved lore wins over brief intent; brief facts never silently become canon.
 
-Useful Builder commands: `upsert_lore`, `propose_rooms_from_lore`, `propose_items_from_lore`, `propose_npcs_from_lore`, `connect_rooms`, `place_item`, `place_npc`, `attach_*_lore`, `validate_world`, `list_lore`, `list_plans`.
+Useful Builder commands: `upsert_lore`, `propose_rooms_from_lore`, `propose_items_from_lore`, `propose_npcs_from_lore`, `connect_rooms`, `place_item`, `place_npc`, `attach_*_lore`, `add_frontier_stub`, `list_frontier_stubs`, `validate_world`, `list_lore`, `list_plans`.
 
 Ungated LLM auto-apply is **not** part of Phase 2a (see `docs/cache/EXPERIMENTAL.md` Exp-007).
+
+### Dynamic frontier expansion (Phase 2d, default off)
+
+Authoring loop:
+
+1. Build and playtest a small fixed world with `world.dynamic_expansion: false` (default).
+2. Approve lore for a future room, then register a prepared stub in `world-builder`:
+
+```text
+upsert_lore room:garden | A walled kitchen garden of damp earth and clipped rosemary.
+add_frontier_stub hallway west --to garden --lore room:garden --name "Kitchen Garden" --return east
+list_frontier_stubs pending
+```
+
+3. With expansion still **off**, play cannot cross the stub (sealed). Existing rooms stay as they are.
+4. Enable in `config.yaml`:
+
+```yaml
+world:
+  dynamic_expansion: true
+  max_new_rooms_per_session: 5
+  require_brief_or_stub: true
+```
+
+5. Cross the stub in play (`go west` from the hallway). The runtime validates lore, commits durable SQLite structure via Builder apply internals, and emits a `room_realized` runtime event.
+6. Restart with `dynamic_expansion: false` — the realized garden **remains** (campaign identity). Turning the switch off only stops further realization.
+
+Play narration never creates rooms; only the stub realize path (or Builder apply) writes structure.
 
 ## Configuration
 
@@ -295,6 +324,10 @@ grok_model: grok-4.5
 chat_npc_id: mrs_hale
 logging:
   level: INFO
+world:
+  dynamic_expansion: false
+  max_new_rooms_per_session: 5
+  require_brief_or_stub: true
 ```
 
 Supported providers: `grok` (default), `openai`, `anthropic`. Set the matching API key in `.env`.
