@@ -8,21 +8,22 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 
 ### Implemented now
 
-- Packaged CLI command: `world-sim`
+- Packaged CLI commands: `world-sim`, `world-builder`
 - Appdir bootstrap, `.env` / `config.yaml`, startup logging
 - Auth (signup/login + admin from `ADMIN_PASSWORD`)
 - SQLite world structure + ChromaDB canonical lore with lore-key refs
 - Seeded Quiet Manor + Mrs. Hale NPC
 - Grounded `play_mode`, admin `edit_mode`, admin sandboxed `chat_mode`
+- World Builder companion: propose / preview / validate / apply (+ `propose_from_brief`)
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
 
 - FastAPI / WebSockets / multiplayer
-- Dedicated World Builder
-- Broad CRUD / large-scale world editing
+- Broad CRUD / large-scale world editing beyond Builder + edit_mode
 - Advanced memory and broad semantic retrieval
 - Focused in-play Player Chat with inventory mutation
+- Dynamic frontier expansion; unsupervised Builder apply (Exp-007)
 
 ## Project Structure
 
@@ -32,6 +33,8 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 ├── README.md
 ├── dev-requirements.txt
 ├── docs/
+├── examples/
+│   └── seed-brief-cellar.yaml
 ├── pyproject.toml
 └── world_sim/
     ├── __init__.py
@@ -39,6 +42,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
     ├── cli.py
     ├── config.py
     ├── auth/
+    ├── builder/
     ├── db/
     ├── llm/
     ├── lore/
@@ -187,21 +191,61 @@ The docs define three main runtime modes:
 
 ## World Builder
 
-The project is also intended to include a companion subsystem named World Builder.
+`world-builder` is a sibling CLI that shares the same appdir, `config.yaml`, `.env`, SQLite DB, and Chroma store as `world-sim`. It seeds and validates **structure** from **approved** Chroma lore. Proposals stay drafts until you explicitly `apply_seed_plan`.
 
-World Builder is intended to:
-- seed structured SQLite entities from approved lore
-- attach explicit lore-key references
-- preview proposed changes before applying them
-- validate cross-store consistency between SQLite and ChromaDB
-- support room topology, placements, linking, reconciliation, and maintenance workflows
+`edit_mode` in World-Sim remains for constrained runtime admin canon ops. Builder owns larger structural seeding (rooms, links, placements, validation).
 
-The recommended strategy is lore-first but structure-reviewed:
-1. create canonical lore in ChromaDB
-2. create structured entities in SQLite explicitly
-3. attach lore-key references
-4. optionally use an LLM to propose structures
-5. require admin review before saving
+### Run beside World-Sim
+
+```bash
+pip install -e .
+world-builder
+```
+
+Uses the same paths as `world-sim` (platformdirs `world-sim` config/data). Plans are stored under `<data_dir>/builder/plans/`.
+
+### Sample flow: lore → brief → draft → preview → validate → apply → play
+
+1. Ensure Quiet Manor is seeded (`world-sim` or `world-builder` once).
+2. In `world-builder`, approve the lore keys the brief will use (**lore first**; this does not create rooms yet):
+
+```text
+upsert_lore room:cellar | The cellar is a cool stone room under the hallway, with packed earth corners and a single oil-stained shelf.
+upsert_lore item:oil_lantern | An oil lantern with a soot-dark chimney and a brass handle worn smooth.
+list_lore room
+```
+
+3. Reuse `examples/seed-brief-cellar.yaml` (goal, caps, must-link / do-not — **intent only, not canon**).
+4. Propose structure from the brief:
+
+```text
+propose_from_brief examples/seed-brief-cellar.yaml
+preview_seed_plan
+validate_world
+apply_seed_plan
+```
+
+`propose_from_brief` writes a **draft** plan only. Preview shows what would change. Apply asks you to type `apply` (or pass `--yes`) before writing SQLite.
+
+5. Play the new structure:
+
+```bash
+WORLD_SIM_LLM=fake world-sim
+```
+
+```text
+look
+go north
+go down
+look
+examine oil lantern
+```
+
+If the brief names lore keys that are not in Chroma, Builder fails closed (gaps on the plan; validate/apply refuse). Approved lore wins over brief intent; brief facts never silently become canon.
+
+Useful Builder commands: `upsert_lore`, `propose_rooms_from_lore`, `propose_items_from_lore`, `propose_npcs_from_lore`, `connect_rooms`, `place_item`, `place_npc`, `attach_*_lore`, `validate_world`, `list_lore`, `list_plans`.
+
+Ungated LLM auto-apply is **not** part of Phase 2a (see `docs/cache/EXPERIMENTAL.md` Exp-007).
 
 ## Configuration
 
@@ -266,7 +310,7 @@ Completed:
 - Slice 5: mode boundaries and Phase 1 completion
 
 Post-MVP / deferred:
-- World Builder, networked clients / multiplayer, advanced memory, broad CRUD
+- Networked clients / multiplayer, advanced memory, broader CRUD, frontier expansion, Exp-007 unsupervised apply
 
 ## License
 

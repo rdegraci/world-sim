@@ -1,0 +1,35 @@
+# Sample guidance brief for World Builder (Phase 2a)
+#
+# Intent only — not canon. Approved Chroma lore wins on conflict.
+# Before propose_from_brief, approve lore in world-builder:
+#
+#   upsert_lore room:cellar | The cellar is a cool stone room under the hallway...
+#   upsert_lore item:oil_lantern | An oil lantern with a soot-dark chimney...
+
+goal: Add a quiet cellar wing under the Quiet Manor hallway
+tone: cool stone air, domestic quiet
+constraints:
+  max_rooms: 1
+  max_items: 1
+  max_npcs: 0
+propose:
+  rooms:
+    - lore_key: room:cellar
+      room_id: cellar
+      name: Cellar
+  items:
+    - lore_key: item:oil_lantern
+      item_id: oil_lantern
+      name: oil lantern
+      place_in: cellar
+  npcs: []
+must_link:
+  - from: hallway
+    direction: down
+    to: cellar
+  - from: cellar
+    direction: up
+    to: hallway
+do_not:
+  - outdoor garden
+  - new town streets

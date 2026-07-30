@@ -1,0 +1,235 @@
+"""Orchestration for World Builder workflows."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from world_sim.builder.apply import ApplyError, apply_seed_plan
+from world_sim.builder.plans import (
+    SeedPlan,
+    create_empty_plan,
+    list_plan_ids,
+    load_plan,
+    save_plan,
+)
+from world_sim.builder.preview import format_seed_plan_preview
+from world_sim.builder.proposals import (
+    attach_lore,
+    connect_rooms,
+    place_item,
+    place_npc,
+    propose_from_brief,
+    propose_items_from_lore,
+    propose_npcs_from_lore,
+    propose_rooms_from_lore,
+)
+from world_sim.builder.validation import ValidationResult, validate_world
+from world_sim.db.world_store import WorldStore
+from world_sim.builder.linking import collection_for_lore_key
+from world_sim.lore.chroma_manager import (
+    ALL_COLLECTIONS,
+    COLLECTION_ITEM,
+    COLLECTION_NPC,
+    COLLECTION_ROOM,
+    COLLECTION_SYSTEM,
+    ChromaManager,
+)
+from world_sim.lore.seed import seed_starter_world
+
+_COLLECTION_ALIASES = {
+    "system": COLLECTION_SYSTEM,
+    "room": COLLECTION_ROOM,
+    "item": COLLECTION_ITEM,
+    "npc": COLLECTION_NPC,
+    COLLECTION_SYSTEM: COLLECTION_SYSTEM,
+    COLLECTION_ROOM: COLLECTION_ROOM,
+    COLLECTION_ITEM: COLLECTION_ITEM,
+    COLLECTION_NPC: COLLECTION_NPC,
+}
+
+
+class BuilderSession:
+    """Stateful builder working against shared World-Sim stores."""
+
+    def __init__(
+        self,
+        world: WorldStore,
+        lore: ChromaManager,
+        data_dir: Path,
+        *,
+        seed_starter: bool = True,
+    ) -> None:
+        self.world = world
+        self.lore = lore
+        self.data_dir = Path(data_dir)
+        self.current_plan_id: str | None = None
+        if seed_starter:
+            seed_starter_world(world, lore)
+
+    def ensure_plan(self) -> SeedPlan:
+        if self.current_plan_id:
+            return self.load_current_plan()
+        plan = create_empty_plan()
+        plan.notes.append("New draft seed plan.")
+        self._persist(plan)
+        return plan
+
+    def load_current_plan(self) -> SeedPlan:
+        if not self.current_plan_id:
+            raise FileNotFoundError("No current seed plan. Create one with propose_* first.")
+        return load_plan(self.data_dir, self.current_plan_id)
+
+    def _persist(self, plan: SeedPlan) -> SeedPlan:
+        save_plan(self.data_dir, plan)
+        self.current_plan_id = plan.plan_id
+        return plan
+
+    def list_plans(self) -> list[str]:
+        return list_plan_ids(self.data_dir)
+
+    def upsert_lore(self, lore_key: str, text: str, *, collection: str | None = None) -> str:
+        """Write approved canon text into Chroma (lore-first step before propose).
+
+        Does not create SQLite structure. Structure still requires propose → apply.
+        """
+        key = lore_key.strip()
+        body = text.strip()
+        if not key:
+            raise ValueError("lore_key is required.")
+        if not body:
+            raise ValueError("lore text is required.")
+
+        if collection:
+            resolved = _COLLECTION_ALIASES.get(collection.strip().lower())
+            if resolved is None:
+                raise ValueError(
+                    f"Unknown collection '{collection}'. "
+                    "Use system, room, item, or npc."
+                )
+        else:
+            resolved = collection_for_lore_key(key)
+            if resolved is None:
+                raise ValueError(
+                    f"Cannot infer collection from lore key '{key}'. "
+                    "Pass collection explicitly (system|room|item|npc)."
+                )
+
+        expected = collection_for_lore_key(key)
+        if expected is not None and expected != resolved:
+            raise ValueError(
+                f"Lore key '{key}' belongs in '{expected}', not '{resolved}'."
+            )
+
+        self.lore.upsert_lore(resolved, key, body)
+        return f"Approved lore upserted: {resolved} / {key}"
+
+    def open_plan(self, plan_id: str) -> SeedPlan:
+        plan = load_plan(self.data_dir, plan_id)
+        self.current_plan_id = plan.plan_id
+        return plan
+
+    def propose_rooms(self, lore_keys: list[str]) -> SeedPlan:
+        plan = self.ensure_plan()
+        propose_rooms_from_lore(plan, self.lore, self.world, lore_keys)
+        return self._persist(plan)
+
+    def propose_items(self, lore_keys: list[str], *, place_in: str | None = None) -> SeedPlan:
+        plan = self.ensure_plan()
+        propose_items_from_lore(
+            plan, self.lore, self.world, lore_keys, place_in=place_in
+        )
+        return self._persist(plan)
+
+    def propose_npcs(
+        self,
+        lore_keys: list[str],
+        *,
+        npc_id: str | None = None,
+        name: str | None = None,
+        current_room_id: str | None = None,
+    ) -> SeedPlan:
+        plan = self.ensure_plan()
+        propose_npcs_from_lore(
+            plan,
+            self.lore,
+            self.world,
+            lore_keys,
+            npc_id=npc_id,
+            name=name,
+            current_room_id=current_room_id,
+        )
+        return self._persist(plan)
+
+    def propose_from_brief(self, brief_path: str | Path) -> SeedPlan:
+        plan = propose_from_brief(self.lore, self.world, str(brief_path))
+        return self._persist(plan)
+
+    def connect_rooms(self, from_room: str, direction: str, to_room: str) -> SeedPlan:
+        plan = self.ensure_plan()
+        connect_rooms(
+            plan,
+            from_room_id=from_room,
+            direction=direction,
+            to_room_id=to_room,
+        )
+        return self._persist(plan)
+
+    def place_item(self, item_id: str, room_id: str) -> SeedPlan:
+        plan = self.ensure_plan()
+        place_item(plan, item_id, room_id)
+        return self._persist(plan)
+
+    def place_npc(self, npc_id: str, room_id: str) -> SeedPlan:
+        plan = self.ensure_plan()
+        place_npc(plan, npc_id, room_id)
+        return self._persist(plan)
+
+    def attach_room_lore(self, room_id: str, lore_key: str) -> SeedPlan:
+        plan = self.ensure_plan()
+        attach_lore(plan, entity_kind="room", entity_id=room_id, lore_key=lore_key)
+        return self._persist(plan)
+
+    def attach_item_lore(self, item_id: str, lore_key: str) -> SeedPlan:
+        plan = self.ensure_plan()
+        attach_lore(
+            plan, entity_kind="item_definition", entity_id=item_id, lore_key=lore_key
+        )
+        return self._persist(plan)
+
+    def attach_npc_lore(self, npc_id: str, lore_key: str) -> SeedPlan:
+        plan = self.ensure_plan()
+        attach_lore(plan, entity_kind="npc", entity_id=npc_id, lore_key=lore_key)
+        return self._persist(plan)
+
+    def preview(self, plan_id: str | None = None) -> str:
+        plan = load_plan(self.data_dir, plan_id) if plan_id else self.load_current_plan()
+        return format_seed_plan_preview(plan)
+
+    def validate(self, plan_id: str | None = None, *, include_plan: bool = True) -> ValidationResult:
+        plan: SeedPlan | None = None
+        if include_plan:
+            target = plan_id or self.current_plan_id
+            if target:
+                plan = load_plan(self.data_dir, target)
+        return validate_world(self.world, self.lore, plan=plan)
+
+    def apply(self, plan_id: str | None = None) -> SeedPlan:
+        target = plan_id or self.current_plan_id
+        if not target:
+            raise ApplyError("No plan specified to apply.")
+        plan = load_plan(self.data_dir, target)
+        applied = apply_seed_plan(self.world, self.lore, plan)
+        return self._persist(applied)
+
+    def list_lore(self, collection: str | None = None) -> list[tuple[str, str, str]]:
+        """Return (collection, key, text_preview) for approved lore."""
+        names = [collection] if collection else list(ALL_COLLECTIONS)
+        rows: list[tuple[str, str, str]] = []
+        for name in names:
+            resolved = _COLLECTION_ALIASES.get(name, name)
+            if resolved not in ALL_COLLECTIONS:
+                raise ValueError(f"Unknown lore collection: {name}")
+            for key, text in self.lore.list_entries(resolved):
+                preview = " ".join(text.split())[:80]
+                rows.append((resolved, key, preview))
+        return rows

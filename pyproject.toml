@@ -19,6 +19,7 @@ dependencies = [
 
 [project.scripts]
 world-sim = "world_sim.cli:main"
+world-builder = "world_sim.builder.cli:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}

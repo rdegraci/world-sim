@@ -214,6 +214,56 @@ class WorldStore:
         ).fetchall()
         return {str(row["direction"]): str(row["to_room_id"]) for row in rows}
 
+    def list_all_exits(self) -> list[tuple[str, str, str]]:
+        """Return all room exits as (from_room_id, direction, to_room_id)."""
+        rows = self._connection.execute(
+            """
+            SELECT from_room_id, direction, to_room_id
+            FROM room_exits
+            ORDER BY from_room_id, direction
+            """
+        ).fetchall()
+        return [
+            (str(row["from_room_id"]), str(row["direction"]), str(row["to_room_id"]))
+            for row in rows
+        ]
+
+    def list_all_lore_key_refs(self) -> list[tuple[str, str, str]]:
+        """Return all lore_key_refs as (entity_kind, entity_id, lore_key)."""
+        rows = self._connection.execute(
+            """
+            SELECT entity_kind, entity_id, lore_key
+            FROM lore_key_refs
+            ORDER BY entity_kind, entity_id, lore_key
+            """
+        ).fetchall()
+        return [
+            (str(row["entity_kind"]), str(row["entity_id"]), str(row["lore_key"]))
+            for row in rows
+        ]
+
+    def list_all_item_instances(self) -> list[ItemInstanceRecord]:
+        rows = self._connection.execute(
+            """
+            SELECT i.*, d.name AS item_name
+            FROM item_instances i
+            LEFT JOIN item_definitions d ON d.item_id = i.item_definition_id
+            ORDER BY i.id
+            """
+        ).fetchall()
+        return [
+            ItemInstanceRecord(
+                id=row["id"],
+                item_definition_id=row["item_definition_id"],
+                definition_key=row["definition_key"],
+                location_kind=row["location_kind"],
+                location_id=row["location_id"],
+                condition=row["condition"],
+                name=row["item_name"],
+            )
+            for row in rows
+        ]
+
     def upsert_item_definition(
         self,
         item_id: str,
