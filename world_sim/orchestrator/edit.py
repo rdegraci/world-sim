@@ -11,11 +11,13 @@ from world_sim.db.world_store import WorldStore
 from world_sim.llm.base import ChatMessage, LLMAdapter
 from world_sim.lore.chroma_manager import (
     COLLECTION_ITEM,
+    COLLECTION_NPC,
     COLLECTION_ROOM,
     COLLECTION_SYSTEM,
     ChromaManager,
 )
 from world_sim.models import AuthContext
+from world_sim.orchestrator.presentation import npc_canonical_description
 from world_sim.orchestrator.prompts import compose_edit_system_prompt
 from world_sim.utils.logger import get_logger
 
@@ -41,10 +43,14 @@ edit_mode commands (admin only):
   view_item_lore <key>
   add_item_lore <item_id> | <text...>
 
+  list_npcs [search=...]
+  view_npc <npc_id>
+  add_npc_lore <npc_id> | <text...>
+
 Notes:
   - create_system_lore stores a pending draft only.
   - approve_draft is required before generated lore becomes canonical.
-  - Canon edits invalidate affected room/item presentation state.
+  - Canon edits invalidate affected room/item/NPC presentation state.
 """
 
 
@@ -124,6 +130,13 @@ class EditOrchestrator:
             return self._view_lore(COLLECTION_ITEM, raw)
         if lowered.startswith("add_item_lore"):
             return self._add_item_lore(raw)
+
+        if lowered.startswith("list_npcs"):
+            return self._list_npcs(raw)
+        if lowered.startswith("view_npc"):
+            return self._view_npc(raw)
+        if lowered.startswith("add_npc_lore"):
+            return self._add_npc_lore(raw)
 
         return EditResult(
             ok=False,
@@ -399,6 +412,85 @@ class EditOrchestrator:
             )
         )
 
+    def _list_npcs(self, raw: str) -> EditResult:
+        search = self._parse_search(raw)
+        npcs = self.world.list_npcs()
+        if search:
+            needle = search.lower()
+            npcs = [
+                npc
+                for npc in npcs
+                if needle in npc.npc_id.lower() or needle in npc.name.lower()
+            ]
+        if not npcs:
+            return EditResult(message="No NPCs found.")
+        lines = [f"npcs ({len(npcs)}):"]
+        for npc in npcs:
+            lines.append(
+                f"- {npc.npc_id}: {npc.name} room={npc.current_room_id} "
+                f"lore={npc.npc_lore}"
+            )
+        return EditResult(message="\n".join(lines))
+
+    def _view_npc(self, raw: str) -> EditResult:
+        parts = raw.split(maxsplit=1)
+        if len(parts) < 2:
+            return EditResult(ok=False, message="Usage: view_npc <npc_id>")
+        npc = self.world.get_npc(parts[1].strip())
+        if npc is None:
+            return EditResult(ok=False, message="NPC not found.")
+        description = npc_canonical_description(self.world, self.lore, npc.npc_id)
+        return EditResult(
+            message=(
+                f"npc_id={npc.npc_id}\n"
+                f"name={npc.name}\n"
+                f"current_room_id={npc.current_room_id}\n"
+                f"condition={npc.condition}\n"
+                f"npc_lore={npc.npc_lore}\n\n"
+                f"{description}"
+            )
+        )
+
+    def _add_npc_lore(self, raw: str) -> EditResult:
+        parsed = self._split_key_and_text("add_npc_lore", raw)
+        if isinstance(parsed, EditResult):
+            return parsed
+        npc_id, text = parsed
+        npc = self.world.get_npc(npc_id)
+        if npc is None:
+            return EditResult(
+                ok=False,
+                message=(
+                    f"NPC '{npc_id}' is not in SQLite. "
+                    "Structural NPC creation beyond seeded records is out of scope here."
+                ),
+            )
+        primary_key = npc.npc_lore[0] if npc.npc_lore else f"npc:{npc_id}:description"
+        lore_keys = list(npc.npc_lore) or [primary_key]
+        if primary_key not in lore_keys:
+            lore_keys.insert(0, primary_key)
+        self.lore.upsert_lore(COLLECTION_NPC, primary_key, text)
+        self.world.upsert_npc(
+            npc.npc_id,
+            npc.name,
+            npc_lore=lore_keys,
+            current_room_id=npc.current_room_id,
+            condition=npc.condition,
+        )
+        self.world.invalidate_npc_presentation(npc.npc_id)
+        self._logger.info(
+            "Admin updated NPC lore npc_id=%s key=%s",
+            npc.npc_id,
+            primary_key,
+        )
+        return EditResult(
+            message=(
+                f"Saved canonical NPC lore for '{npc.npc_id}' (key={primary_key}). "
+                "NPC inventory/runtime placement were not modified. "
+                "Presentation state invalidated for this NPC."
+            )
+        )
+
     def _invalidate_for_lore_key(
         self,
         collection_name: str,
@@ -416,4 +508,11 @@ class EditOrchestrator:
                     definition.item_id
                 )
             return ", ".join(definition.item_id for definition in definitions)
+        if collection_name == COLLECTION_NPC:
+            affected: list[str] = []
+            for npc in self.world.list_npcs():
+                if lore_key in npc.npc_lore:
+                    self.world.invalidate_npc_presentation(npc.npc_id)
+                    affected.append(npc.npc_id)
+            return ", ".join(affected)
         return ""

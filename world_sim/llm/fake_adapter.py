@@ -19,12 +19,24 @@ class FakeAdapter:
         messages: list[ChatMessage],
         tools: list[dict[str, Any]] | None = None,
     ) -> LLMResponse:
-        del system, tools
+        del tools
         content = ""
         for message in reversed(messages):
             if message.role == "user":
                 content = message.content.strip()
                 break
+
+        if "## Active Mode: chat_mode" in system or any(
+            "SANDBOX CONTEXT" in message.content for message in messages
+        ):
+            return LLMResponse(
+                text=(
+                    "Mrs. Hale: The manor keeps its rooms as they are recorded. "
+                    "I can speak with you here, but I will not change the house's "
+                    "facts from this conversation alone."
+                ),
+                tool_calls=[],
+            )
 
         if "Create a reviewable system lore draft" in content:
             prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
@@ -79,13 +91,28 @@ class FakeAdapter:
 
         examine = re.match(r"^(?:examine|inspect|x)\s+(.+)$", lower)
         if examine:
+            target = examine.group(1).strip()
+            if any(
+                token in target
+                for token in ("hale", "mrs", "npc", "woman", "caretaker")
+            ):
+                return LLMResponse(
+                    text="",
+                    tool_calls=[
+                        ToolCall(
+                            id=str(uuid4()),
+                            name="examine_npc",
+                            arguments={"npc_name": target},
+                        )
+                    ],
+                )
             return LLMResponse(
                 text="",
                 tool_calls=[
                     ToolCall(
                         id=str(uuid4()),
                         name="examine_item",
-                        arguments={"item_name": examine.group(1).strip()},
+                        arguments={"item_name": target},
                     )
                 ],
             )

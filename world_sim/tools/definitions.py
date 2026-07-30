@@ -69,6 +69,21 @@ PLAY_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "examine_npc",
+            "description": "Present the full canonical description for an NPC in the current room.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "npc_name": {"type": "string"},
+                    "npc_id": {"type": "string"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "advance_time",
             "description": "Advance the shared world clock by a number of minutes.",
             "parameters": {

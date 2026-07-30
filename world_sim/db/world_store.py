@@ -22,6 +22,15 @@ class ItemDefinition:
 
 
 @dataclass(frozen=True)
+class NpcRecord:
+    npc_id: str
+    name: str
+    npc_lore: list[str]
+    current_room_id: str | None = None
+    condition: str | None = None
+
+
+@dataclass(frozen=True)
 class ItemInstanceRecord:
     id: int
     item_definition_id: str | None
@@ -569,4 +578,172 @@ class WorldStore:
                 )
                 """,
                 (item_definition_id,),
+            )
+
+    def upsert_npc(
+        self,
+        npc_id: str,
+        name: str,
+        *,
+        npc_lore: list[str],
+        current_room_id: str | None = None,
+        condition: str | None = None,
+    ) -> NpcRecord:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO npcs (npc_id, name, current_room_id, condition)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(npc_id) DO UPDATE SET
+                    name = excluded.name,
+                    current_room_id = excluded.current_room_id,
+                    condition = excluded.condition
+                """,
+                (npc_id, name, current_room_id, condition),
+            )
+            self._connection.execute(
+                "DELETE FROM npc_lore_keys WHERE npc_id = ?",
+                (npc_id,),
+            )
+            for index, lore_key in enumerate(npc_lore):
+                self._connection.execute(
+                    """
+                    INSERT INTO npc_lore_keys (npc_id, lore_key, sort_order)
+                    VALUES (?, ?, ?)
+                    """,
+                    (npc_id, lore_key, index),
+                )
+                self._connection.execute(
+                    """
+                    INSERT OR IGNORE INTO lore_key_refs (entity_kind, entity_id, lore_key)
+                    VALUES ('npc', ?, ?)
+                    """,
+                    (npc_id, lore_key),
+                )
+        record = self.get_npc(npc_id)
+        if record is None:
+            raise RuntimeError(f"Failed to load NPC '{npc_id}'.")
+        return record
+
+    def get_npc(self, npc_id: str) -> NpcRecord | None:
+        row = self._connection.execute(
+            "SELECT * FROM npcs WHERE npc_id = ?",
+            (npc_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        lore_rows = self._connection.execute(
+            """
+            SELECT lore_key FROM npc_lore_keys
+            WHERE npc_id = ?
+            ORDER BY sort_order ASC, lore_key ASC
+            """,
+            (npc_id,),
+        ).fetchall()
+        return NpcRecord(
+            npc_id=row["npc_id"],
+            name=row["name"],
+            npc_lore=[str(item["lore_key"]) for item in lore_rows],
+            current_room_id=row["current_room_id"],
+            condition=row["condition"],
+        )
+
+    def list_npcs(self) -> list[NpcRecord]:
+        rows = self._connection.execute(
+            "SELECT npc_id FROM npcs ORDER BY npc_id"
+        ).fetchall()
+        npcs: list[NpcRecord] = []
+        for row in rows:
+            npc = self.get_npc(str(row["npc_id"]))
+            if npc is not None:
+                npcs.append(npc)
+        return npcs
+
+    def list_npcs_in_room(self, room_id: str) -> list[NpcRecord]:
+        rows = self._connection.execute(
+            """
+            SELECT npc_id FROM npcs
+            WHERE current_room_id = ?
+            ORDER BY npc_id
+            """,
+            (room_id,),
+        ).fetchall()
+        npcs: list[NpcRecord] = []
+        for row in rows:
+            npc = self.get_npc(str(row["npc_id"]))
+            if npc is not None:
+                npcs.append(npc)
+        return npcs
+
+    def find_npc_by_name(self, name_query: str) -> NpcRecord | None:
+        query = name_query.strip().lower()
+        for npc in self.list_npcs():
+            if query in npc.name.lower() or query == npc.npc_id.lower():
+                return npc
+        return None
+
+    def set_npc_room(self, npc_id: str, room_id: str | None) -> None:
+        with self._connection:
+            self._connection.execute(
+                "UPDATE npcs SET current_room_id = ? WHERE npc_id = ?",
+                (room_id, npc_id),
+            )
+
+    def set_npc_condition(self, npc_id: str, condition: str | None) -> None:
+        with self._connection:
+            self._connection.execute(
+                "UPDATE npcs SET condition = ? WHERE npc_id = ?",
+                (condition, npc_id),
+            )
+
+    def get_npc_presentation(
+        self,
+        player_character_id: int,
+        npc_id: str,
+    ) -> tuple[bool, str | None]:
+        row = self._connection.execute(
+            """
+            SELECT full_description_seen, stable_recap
+            FROM npc_presentation_state
+            WHERE player_character_id = ? AND npc_id = ?
+            """,
+            (player_character_id, npc_id),
+        ).fetchone()
+        if row is None:
+            return False, None
+        return bool(row["full_description_seen"]), row["stable_recap"]
+
+    def mark_npc_full_description_seen(
+        self,
+        player_character_id: int,
+        npc_id: str,
+        stable_recap: str,
+    ) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO npc_presentation_state (
+                    player_character_id, npc_id,
+                    full_description_seen, stable_recap
+                )
+                VALUES (?, ?, 1, ?)
+                ON CONFLICT(player_character_id, npc_id) DO UPDATE SET
+                    full_description_seen = 1,
+                    stable_recap = COALESCE(
+                        npc_presentation_state.stable_recap,
+                        excluded.stable_recap
+                    )
+                """,
+                (player_character_id, npc_id, stable_recap),
+            )
+
+    def invalidate_npc_presentation(self, npc_id: str) -> None:
+        with self._connection:
+            self._connection.execute(
+                """
+                UPDATE npc_presentation_state
+                SET full_description_seen = 0, stable_recap = NULL
+                WHERE npc_id = ?
+                """,
+                (npc_id,),
             )

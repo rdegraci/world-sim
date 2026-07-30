@@ -7,6 +7,7 @@ from collections.abc import Callable
 
 from world_sim.db.user_store import UserStore
 from world_sim.models import AuthContext
+from world_sim.orchestrator.chat import ChatAccessError, ChatOrchestrator
 from world_sim.orchestrator.edit import EditAccessError, EditOrchestrator
 from world_sim.orchestrator.play import PlayOrchestrator
 from world_sim.utils.logger import get_logger
@@ -17,6 +18,7 @@ Commands:
   whoami     Show the authenticated user and player character
   mode play  Stay in / return to play_mode
   mode edit  Enter admin-only edit_mode (admin only)
+  mode chat  Enter admin-only sandboxed chat_mode (admin only)
   look       Look at the current room (full canonical description)
   inventory  List carried items
   quit       Exit World-Sim
@@ -29,12 +31,21 @@ InputFn = Callable[[str], str]
 OutputFn = Callable[[str], None]
 
 
+def _mode_prompt(mode: str) -> str:
+    if mode == "edit":
+        return "edit> "
+    if mode == "chat":
+        return "chat> "
+    return "> "
+
+
 def run_session(
     *,
     auth: AuthContext | None = None,
     store: UserStore | None = None,
     play: PlayOrchestrator | None = None,
     edit: EditOrchestrator | None = None,
+    chat: ChatOrchestrator | None = None,
     input_fn: InputFn = input,
     output_fn: OutputFn = print,
 ) -> int:
@@ -82,8 +93,7 @@ def run_session(
     try:
         while True:
             try:
-                prompt = "edit> " if mode == "edit" else "> "
-                raw = input_fn(prompt)
+                raw = input_fn(_mode_prompt(mode))
             except EOFError:
                 output_fn("")
                 output_fn("Goodbye.")
@@ -109,6 +119,8 @@ def run_session(
             if command in {"help", "?"}:
                 if mode == "edit" and edit is not None:
                     output_fn(edit.handle("help").message)
+                elif mode == "chat" and chat is not None:
+                    output_fn(chat.handle("help").message)
                 else:
                     output_fn(PLAY_HELP)
                 continue
@@ -125,12 +137,15 @@ def run_session(
                 continue
             if command.startswith("mode "):
                 target = command.split(maxsplit=1)[1].strip()
+                previous = mode
                 if target == "play":
                     mode = "play"
+                    logger.info("Mode boundary %s -> play", previous)
                     output_fn("Switched to play_mode.")
                     continue
                 if target == "edit":
                     if auth is None or not auth.is_admin:
+                        logger.info("Denied edit_mode for non-admin")
                         output_fn(
                             "edit_mode is admin-only. "
                             "Non-admin users cannot access canon operations."
@@ -140,11 +155,33 @@ def run_session(
                         output_fn("edit_mode is not available in this session.")
                         continue
                     mode = "edit"
+                    logger.info("Mode boundary %s -> edit", previous)
                     output_fn(
                         "Switched to edit_mode. Type 'help' for constrained canon commands."
                     )
                     continue
-                output_fn("Unknown mode. Use 'mode play' or 'mode edit'.")
+                if target == "chat":
+                    if auth is None or not auth.is_admin:
+                        logger.info("Denied chat_mode for non-admin")
+                        output_fn(
+                            "chat_mode is admin-only. "
+                            "Non-admin users cannot access sandboxed NPC chat."
+                        )
+                        continue
+                    if chat is None:
+                        output_fn("chat_mode is not available in this session.")
+                        continue
+                    mode = "chat"
+                    logger.info(
+                        "Mode boundary %s -> chat npc=%s",
+                        previous,
+                        chat.npc_id,
+                    )
+                    opening = chat.opening()
+                    output_fn(opening)
+                    _record("assistant", opening)
+                    continue
+                output_fn("Unknown mode. Use 'mode play', 'mode edit', or 'mode chat'.")
                 continue
             if command == "inventory":
                 if play is None:
@@ -170,6 +207,19 @@ def run_session(
                     continue
                 output_fn(result.message)
                 _record("assistant", result.message)
+                continue
+
+            if mode == "chat":
+                if chat is None:
+                    output_fn("chat_mode is not available in this session.")
+                    continue
+                try:
+                    result = chat.handle(line)
+                except ChatAccessError as exc:
+                    output_fn(str(exc))
+                    mode = "play"
+                    continue
+                output_fn(result.message)
                 continue
 
             if play is not None:

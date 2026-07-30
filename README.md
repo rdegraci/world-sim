@@ -4,7 +4,7 @@ World-Sim is a Python narrative simulation project. Today, the repository provid
 
 ## Status
 
-Slices 1–4 are implemented. Slice 5 still ahead.
+Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 
 ### Implemented now
 
@@ -12,31 +12,17 @@ Slices 1–4 are implemented. Slice 5 still ahead.
 - Appdir bootstrap, `.env` / `config.yaml`, startup logging
 - Auth (signup/login + admin from `ADMIN_PASSWORD`)
 - SQLite world structure + ChromaDB canonical lore with lore-key refs
-- Seeded Quiet Manor starter world and grounded `play_mode`
-- Admin-only `edit_mode` with constrained canon commands and review-before-save drafts
-- Grok adapter by default; `WORLD_SIM_LLM=fake` for offline play/tests
+- Seeded Quiet Manor + Mrs. Hale NPC
+- Grounded `play_mode`, admin `edit_mode`, admin sandboxed `chat_mode`
+- Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
-### Planned MVP direction
+### Deferred after MVP
 
-- Admin `chat_mode` and Phase 1 completion (Slice 5)
-- OpenAI / Anthropic provider expansion
-- Companion `world-builder` workflow
-- Optional WebSocket / networked clients after the local CLI runtime is solid
-
-## Features
-
-### Available today
-
-- Local signup/login and admin auth
-- Grounded play in the Quiet Manor (move, take, look, examine, wait)
-- Room/item full description vs stable recap presentation
-- Admin `mode edit` for system/room/item lore list/view/add and draft approve/reject
-- False unsupported claims refused in-character (no invented ontology)
-
-### Planned for later MVP slices
-
-- Admin `chat_mode` for sandboxed NPC testing
-- Broader multi-provider support beyond Grok
+- FastAPI / WebSockets / multiplayer
+- Dedicated World Builder
+- Broad CRUD / large-scale world editing
+- Advanced memory and broad semantic retrieval
+- Focused in-play Player Chat with inventory mutation
 
 ## Project Structure
 
@@ -121,6 +107,18 @@ view_system_lore system:draft_a_note_about_the_manor_s_evening_bell
 add_room_lore foyer | The foyer smells faintly of rain-soaked coats.
 list_room_lore
 mode play
+```
+
+Admin sandboxed NPC chat:
+
+```text
+mode chat
+Hello, Mrs. Hale.
+who
+mode play
+go north
+go east
+examine mrs hale
 ```
 
 ```bash
@@ -218,9 +216,12 @@ Default `config.yaml`:
 ```yaml
 provider: grok
 grok_model: grok-4.5
+chat_npc_id: mrs_hale
 logging:
   level: INFO
 ```
+
+Supported providers: `grok` (default), `openai`, `anthropic`. Set the matching API key in `.env`.
 
 Example `.env` secrets:
 
@@ -262,10 +263,10 @@ Completed:
 - Slice 2: auth and minimal structured runtime
 - Slice 3: canonical lore and grounded play loop
 - Slice 4: controlled admin canon operations
+- Slice 5: mode boundaries and Phase 1 completion
 
-Near-term likely work:
-- Slice 5: sandboxed admin `chat_mode` and Phase 1 completion
-- later: World Builder, then networked clients / multiplayer
+Post-MVP / deferred:
+- World Builder, networked clients / multiplayer, advanced memory, broad CRUD
 
 ## License
 

@@ -134,6 +134,30 @@ CREATE TABLE IF NOT EXISTS lore_drafts (
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
     reviewed_at TEXT
 );
+
+CREATE TABLE IF NOT EXISTS npcs (
+    npc_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    current_room_id TEXT REFERENCES rooms(room_id),
+    condition TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+);
+
+CREATE TABLE IF NOT EXISTS npc_lore_keys (
+    npc_id TEXT NOT NULL REFERENCES npcs(npc_id) ON DELETE CASCADE,
+    lore_key TEXT NOT NULL,
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (npc_id, lore_key)
+);
+
+CREATE TABLE IF NOT EXISTS npc_presentation_state (
+    player_character_id INTEGER NOT NULL
+        REFERENCES player_characters(id) ON DELETE CASCADE,
+    npc_id TEXT NOT NULL REFERENCES npcs(npc_id) ON DELETE CASCADE,
+    full_description_seen INTEGER NOT NULL DEFAULT 0,
+    stable_recap TEXT,
+    PRIMARY KEY (player_character_id, npc_id)
+);
 """
 
 

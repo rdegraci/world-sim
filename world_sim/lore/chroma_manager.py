@@ -13,7 +13,13 @@ from world_sim.utils.logger import get_logger
 COLLECTION_SYSTEM = "system_lore"
 COLLECTION_ROOM = "room_lore"
 COLLECTION_ITEM = "item_lore"
-ALL_COLLECTIONS = (COLLECTION_SYSTEM, COLLECTION_ROOM, COLLECTION_ITEM)
+COLLECTION_NPC = "npc_lore"
+ALL_COLLECTIONS = (
+    COLLECTION_SYSTEM,
+    COLLECTION_ROOM,
+    COLLECTION_ITEM,
+    COLLECTION_NPC,
+)
 
 
 class DeterministicEmbeddingFunction(EmbeddingFunction[Documents]):

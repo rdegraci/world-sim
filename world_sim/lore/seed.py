@@ -1,10 +1,11 @@
-"""Hand-seeded starter world for Slice 3 grounded play."""
+"""Hand-seeded starter world for grounded play and admin chat."""
 
 from __future__ import annotations
 
 from world_sim.db.world_store import WorldStore
 from world_sim.lore.chroma_manager import (
     COLLECTION_ITEM,
+    COLLECTION_NPC,
     COLLECTION_ROOM,
     COLLECTION_SYSTEM,
     ChromaManager,
@@ -12,6 +13,7 @@ from world_sim.lore.chroma_manager import (
 from world_sim.utils.logger import get_logger
 
 SEED_FLAG = "starter_world_v1"
+SEED_NPC_FLAG = "starter_npc_v1"
 
 SYSTEM_LORE_KEY = "system:quiet_manor"
 SYSTEM_LORE_TEXT = (
@@ -84,13 +86,29 @@ ITEMS = [
     ),
 ]
 
+DEFAULT_CHAT_NPC_ID = "mrs_hale"
+NPC_DESCRIPTION_KEY = "npc:mrs_hale:description"
+NPC_PERSONALITY_KEY = "npc:mrs_hale:personality"
+NPC_DESCRIPTION_TEXT = (
+    "Mrs. Hale is a tidy older woman in a charcoal cardigan, with silver hair "
+    "pinned back and ink-stained fingertips. She stands as if the study belongs "
+    "to her careful attention."
+)
+NPC_PERSONALITY_TEXT = (
+    "Mrs. Hale speaks politely and precisely. She knows the Quiet Manor's rooms "
+    "and habits, prefers facts over rumor, and will not invent doors, objects, or "
+    "people that are not present. She is curious about visitors but protective of "
+    "the house's order."
+)
+
 START_ROOM_ID = "foyer"
 
 
 def seed_starter_world(world: WorldStore, lore: ChromaManager) -> bool:
     """Seed the starter manor if not already present. Returns True if seeded now."""
     if world.get_meta(SEED_FLAG) == "1":
-        return False
+        seeded_npc = seed_starter_npc(world, lore)
+        return seeded_npc
 
     logger = get_logger("seed")
     lore.upsert_lore(COLLECTION_SYSTEM, SYSTEM_LORE_KEY, SYSTEM_LORE_TEXT)
@@ -113,7 +131,28 @@ def seed_starter_world(world: WorldStore, lore: ChromaManager) -> bool:
         )
 
     world.set_meta(SEED_FLAG, "1")
+    seed_starter_npc(world, lore)
     logger.info("Seeded starter world Quiet Manor (foyer/hallway/study).")
+    return True
+
+
+def seed_starter_npc(world: WorldStore, lore: ChromaManager) -> bool:
+    """Seed the configured chat NPC if missing. Safe for existing Slice 3 DBs."""
+    if world.get_meta(SEED_NPC_FLAG) == "1" and world.get_npc(DEFAULT_CHAT_NPC_ID):
+        return False
+
+    lore.upsert_lore(COLLECTION_NPC, NPC_DESCRIPTION_KEY, NPC_DESCRIPTION_TEXT)
+    lore.upsert_lore(COLLECTION_NPC, NPC_PERSONALITY_KEY, NPC_PERSONALITY_TEXT)
+    world.upsert_npc(
+        DEFAULT_CHAT_NPC_ID,
+        "Mrs. Hale",
+        npc_lore=[NPC_DESCRIPTION_KEY, NPC_PERSONALITY_KEY],
+        current_room_id="study",
+        condition="calm",
+    )
+    world.set_meta(SEED_NPC_FLAG, "1")
+    world.set_meta("chat_npc_id", DEFAULT_CHAT_NPC_ID)
+    get_logger("seed").info("Seeded starter NPC Mrs. Hale in the study.")
     return True
 
 

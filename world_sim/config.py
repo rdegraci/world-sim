@@ -21,6 +21,9 @@ DEFAULT_CONFIG_YAML = """\
 # World-Sim runtime settings
 provider: grok
 grok_model: grok-4.5
+# openai_model: gpt-4o-mini
+# anthropic_model: claude-sonnet-4-20250514
+chat_npc_id: mrs_hale
 logging:
   level: INFO
 """
@@ -200,6 +203,20 @@ def validate_and_build_settings(
         raise ConfigError(
             f"Missing required secret GROK_API_KEY in {paths.env_path}. "
             "Set GROK_API_KEY to a non-empty value and restart."
+        )
+    if provider == "openai" and not openai_api_key:
+        raise ConfigError(
+            f"Missing required secret OPENAI_API_KEY in {paths.env_path}. "
+            "Set OPENAI_API_KEY to a non-empty value and restart."
+        )
+    if provider in {"anthropic", "claude"} and not anthropic_api_key:
+        raise ConfigError(
+            f"Missing required secret ANTHROPIC_API_KEY in {paths.env_path}. "
+            "Set ANTHROPIC_API_KEY to a non-empty value and restart."
+        )
+    if provider not in {"grok", "openai", "anthropic", "claude"}:
+        raise ConfigError(
+            f"Unknown provider '{provider}'. Supported: grok, openai, anthropic."
         )
 
     return Settings(

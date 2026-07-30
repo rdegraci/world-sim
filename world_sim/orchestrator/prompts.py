@@ -24,3 +24,8 @@ def compose_play_system_prompt() -> str:
 def compose_edit_system_prompt() -> str:
     """Compose core + edit_mode overlay."""
     return f"{load_prompt_file('core')}\n\n{load_prompt_file('edit_mode')}"
+
+
+def compose_chat_system_prompt() -> str:
+    """Compose core + chat_mode overlay."""
+    return f"{load_prompt_file('core')}\n\n{load_prompt_file('chat_mode')}"

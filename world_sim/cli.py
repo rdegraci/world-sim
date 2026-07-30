@@ -12,7 +12,12 @@ from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import WorldStore
 from world_sim.llm.factory import create_llm_adapter
 from world_sim.lore.chroma_manager import ChromaManager
-from world_sim.lore.seed import ensure_player_starting_room, seed_starter_world
+from world_sim.lore.seed import (
+    DEFAULT_CHAT_NPC_ID,
+    ensure_player_starting_room,
+    seed_starter_world,
+)
+from world_sim.orchestrator.chat import ChatOrchestrator
 from world_sim.orchestrator.edit import EditOrchestrator
 from world_sim.orchestrator.play import PlayOrchestrator
 from world_sim.server.session_server import run_session
@@ -20,7 +25,7 @@ from world_sim.utils.logger import get_logger, setup_logging
 
 
 def run_app(settings: Settings) -> int:
-    """Initialize storage, seed world, authenticate, and enter play/edit session."""
+    """Initialize storage, seed world, authenticate, and enter play/edit/chat."""
     logger = get_logger("cli")
     db = SqliteManager(settings.paths.sqlite_path)
     try:
@@ -49,7 +54,17 @@ def run_app(settings: Settings) -> int:
             return 130
 
         ensure_player_starting_room(world, auth.player_character.id)
-        llm = create_llm_adapter(settings)
+        try:
+            llm = create_llm_adapter(settings)
+        except ConfigError as exc:
+            print(f"World-Sim configuration error: {exc}", file=sys.stderr)
+            return 1
+
+        chat_npc_id = str(
+            settings.raw_config.get("chat_npc_id")
+            or world.get_meta("chat_npc_id")
+            or DEFAULT_CHAT_NPC_ID
+        )
         play = PlayOrchestrator(
             world=world,
             lore=lore,
@@ -64,15 +79,24 @@ def run_app(settings: Settings) -> int:
             llm=llm,
             auth=auth,
         )
+        chat = ChatOrchestrator(
+            world=world,
+            lore=lore,
+            llm=llm,
+            user_store=store,
+            auth=auth,
+            npc_id=chat_npc_id,
+        )
 
         logger.info(
-            "Authenticated username=%s role=%s session_id=%s room=%s",
+            "Authenticated username=%s role=%s session_id=%s room=%s chat_npc=%s",
             auth.user.username,
             auth.user.role,
             auth.session.id,
             world.get_player_room_id(auth.player_character.id),
+            chat_npc_id,
         )
-        return run_session(auth=auth, store=store, play=play, edit=edit)
+        return run_session(auth=auth, store=store, play=play, edit=edit, chat=chat)
     finally:
         db.close()
 

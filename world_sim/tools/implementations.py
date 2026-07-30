@@ -13,6 +13,7 @@ from world_sim.lore.chroma_manager import (
 )
 from world_sim.orchestrator.presentation import (
     present_item,
+    present_npc,
     present_room,
 )
 
@@ -42,6 +43,7 @@ class PlayTools:
             "take_item": self.take_item,
             "look_room": self.look_room,
             "examine_item": self.examine_item,
+            "examine_npc": self.examine_npc,
             "advance_time": self.advance_time,
         }
 
@@ -161,6 +163,38 @@ class PlayTools:
             ok=True,
             message=text,
             data={"item_instance_id": item.id},
+        )
+
+    def examine_npc(self, arguments: dict[str, Any]) -> ToolResult:
+        room_id = self.world.get_player_room_id(self.player_character_id)
+        if room_id is None:
+            return ToolResult(ok=False, message="There is no room to examine NPCs in.")
+
+        npc_id = arguments.get("npc_id")
+        if npc_id:
+            npc = self.world.get_npc(str(npc_id))
+        else:
+            name = str(arguments.get("npc_name", "")).strip()
+            if not name:
+                return ToolResult(ok=False, message="Examine whom?")
+            npc = self.world.find_npc_by_name(name)
+
+        if npc is None or npc.current_room_id != room_id:
+            return ToolResult(
+                ok=False,
+                message="No such person is present here.",
+            )
+        text = present_npc(
+            self.world,
+            self.lore,
+            player_character_id=self.player_character_id,
+            npc_id=npc.npc_id,
+            force_full=True,
+        )
+        return ToolResult(
+            ok=True,
+            message=text,
+            data={"npc_id": npc.npc_id},
         )
 
     def advance_time(self, arguments: dict[str, Any]) -> ToolResult:
