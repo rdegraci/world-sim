@@ -82,6 +82,15 @@ class ChromaManager:
             return None
         return str(documents[0])
 
+    def delete_lore(self, collection_name: str, key: str) -> bool:
+        """Delete a lore entry by key. Returns True if it existed."""
+        if collection_name not in self._collections:
+            raise ValueError(f"Unknown lore collection: {collection_name}")
+        if self.get_lore(collection_name, key) is None:
+            return False
+        self._collections[collection_name].delete(ids=[key])
+        return True
+
     def list_keys(self, collection_name: str) -> list[str]:
         return [key for key, _text in self.list_entries(collection_name)]
 

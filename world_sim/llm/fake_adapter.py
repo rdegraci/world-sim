@@ -50,6 +50,47 @@ class FakeAdapter:
                 tool_calls=[],
             )
 
+        if "Create a reviewable room lore draft" in content:
+            prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
+            prompt_text = prompt_match.group(1).strip() if prompt_match else content
+            key_match = re.search(r"Target lore_key:\s*(\S+)", content)
+            key = key_match.group(1) if key_match else "room:unknown"
+            return LLMResponse(
+                text=(
+                    f"Revised room lore for {key}: {prompt_text}. "
+                    "The manor room keeps this meaning only after admin approval."
+                ),
+                tool_calls=[],
+            )
+
+        if "Create a reviewable item lore draft" in content:
+            prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
+            prompt_text = prompt_match.group(1).strip() if prompt_match else content
+            key_match = re.search(r"Target lore_key:\s*(\S+)", content)
+            key = key_match.group(1) if key_match else "item:unknown"
+            return LLMResponse(
+                text=(
+                    f"Revised item lore for {key}: {prompt_text}. "
+                    "The object meaning awaits explicit admin approval."
+                ),
+                tool_calls=[],
+            )
+
+        if "Create a reviewable NPC draft" in content:
+            prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
+            prompt_text = prompt_match.group(1).strip() if prompt_match else "new npc"
+            slug = re.sub(r"[^a-z0-9]+", "_", prompt_text.lower()).strip("_")[:24] or "npc"
+            return LLMResponse(
+                text=(
+                    f"NPC_ID: {slug}\n"
+                    f"NAME: {slug.replace('_', ' ').title()}\n"
+                    f"DESCRIPTION:\n"
+                    f"A Quiet Manor figure drafted from: {prompt_text}. "
+                    "They remain consistent with recorded rooms and will not invent facts."
+                ),
+                tool_calls=[],
+            )
+
         lower = content.lower()
 
         move = re.match(

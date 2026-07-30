@@ -15,6 +15,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Seeded Quiet Manor + Mrs. Hale NPC
 - Grounded `play_mode`, admin `edit_mode`, admin sandboxed `chat_mode`
 - World Builder companion: propose / preview / validate / apply (+ `propose_from_brief`)
+- Richer admin `edit_mode`: `create_room_lore` / `create_item_lore` / `create_npc` drafts, list filters, delete guards
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
@@ -102,16 +103,33 @@ Admin canon editing (after logging in as `admin`):
 
 ```text
 mode edit
-create_system_lore A note about the manor's evening bell
+list_rooms
+list_room_lore search=foyer
+create_room_lore foyer Mention damp coats by the door
 list_drafts
 view_draft 1
 approve_draft 1
-list_system_lore
-view_system_lore system:draft_a_note_about_the_manor_s_evening_bell
-add_room_lore foyer | The foyer smells faintly of rain-soaked coats.
-list_room_lore
+mode play
+look
+```
+
+After `approve_draft`, the next encounter/look uses the **full** canonical description again (recap + seen-state invalidated).
+
+Other Phase 2b edit paths:
+
+```text
+mode edit
+create_item_lore brass_key Emphasize a scratched numeral
+create_npc A gardener who tends the courtyard pots
+approve_draft 2
+add_npc gardener | Gardener | npc:gardener:description --in foyer
+add_room_lore foyer | Direct rewrite without LLM
+create_system_lore A note about the manor's evening bell
+approve_draft 3
 mode play
 ```
+
+LLM-assisted `create_*` commands stay drafts until `approve_draft`. Bulk rooms/exits/placements stay in `world-builder`.
 
 Admin sandboxed NPC chat:
 
