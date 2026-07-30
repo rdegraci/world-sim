@@ -10,6 +10,11 @@ from world_sim.llm.base import ChatMessage, LLMAdapter
 from world_sim.lore.chroma_manager import ChromaManager
 from world_sim.models import AuthContext
 from world_sim.orchestrator.context_builder import ContextBuilder
+from world_sim.orchestrator.player_chat import (
+    PlayerChatEnterResult,
+    PlayerChatOrchestrator,
+    PlayerChatTurnResult,
+)
 from world_sim.orchestrator.presentation import present_room
 from world_sim.orchestrator.prompts import compose_play_system_prompt
 from world_sim.tools.definitions import PLAY_TOOLS
@@ -47,7 +52,27 @@ class PlayOrchestrator:
             player_character_id=auth.player_character.id,
         )
         self.system_prompt = compose_play_system_prompt()
+        self.player_chat = PlayerChatOrchestrator(
+            world=world,
+            lore=lore,
+            llm=llm,
+            user_store=user_store,
+            auth=auth,
+        )
         self._logger = get_logger("play")
+
+    @property
+    def in_player_chat(self) -> bool:
+        return self.player_chat.active
+
+    def try_begin_player_chat(self, line: str) -> PlayerChatEnterResult | None:
+        return self.player_chat.try_enter(line)
+
+    def handle_player_chat(self, line: str) -> PlayerChatTurnResult:
+        return self.player_chat.handle(line)
+
+    def end_player_chat(self, *, reason: str = "player") -> str:
+        return self.player_chat.end(reason=reason)
 
     def opening_presentation(self) -> str:
         room_id = self.world.get_player_room_id(self.auth.player_character.id)
@@ -110,8 +135,6 @@ class PlayOrchestrator:
 
         parts = [part for part in tool_messages if part]
         if response.text.strip():
-            # If tools already produced presentation, keep LLM text as optional color
-            # only when no tools ran.
             if not parts:
                 parts.append(response.text.strip())
             elif not tool_names:

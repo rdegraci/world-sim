@@ -21,21 +21,26 @@ Commands:
   mode chat  Enter admin-only sandboxed chat_mode (admin only)
   look       Look at the current room (full canonical description)
   inventory  List carried items
+  talk to <npc>   Start focused in-play Player Chat with a present NPC
+  end_chat   End focused Player Chat (while talking)
   quit       Exit World-Sim
   exit       Exit World-Sim
 
 Other lines are treated as play_mode actions (move, take, examine, wait, ...).
+While in Player Chat, lines are spoken to the active NPC.
 """
 
 InputFn = Callable[[str], str]
 OutputFn = Callable[[str], None]
 
 
-def _mode_prompt(mode: str) -> str:
+def _mode_prompt(mode: str, *, in_player_chat: bool = False) -> str:
     if mode == "edit":
         return "edit> "
     if mode == "chat":
         return "chat> "
+    if in_player_chat:
+        return "talk> "
     return "> "
 
 
@@ -93,7 +98,8 @@ def run_session(
     try:
         while True:
             try:
-                raw = input_fn(_mode_prompt(mode))
+                in_player_chat = bool(play is not None and play.in_player_chat)
+                raw = input_fn(_mode_prompt(mode, in_player_chat=in_player_chat))
             except EOFError:
                 output_fn("")
                 output_fn("Goodbye.")
@@ -138,6 +144,10 @@ def run_session(
             if command.startswith("mode "):
                 target = command.split(maxsplit=1)[1].strip()
                 previous = mode
+                if play is not None and play.in_player_chat:
+                    ended = play.end_player_chat(reason="mode_switch")
+                    output_fn(ended)
+                    _record("assistant", ended)
                 if target == "play":
                     mode = "play"
                     logger.info("Mode boundary %s -> play", previous)
@@ -187,6 +197,12 @@ def run_session(
                 if play is None:
                     output_fn("Play runtime is not available.")
                     continue
+                if play.in_player_chat:
+                    output_fn(
+                        "You are in focused conversation. "
+                        "Type end_chat first, or ask the NPC about what you carry."
+                    )
+                    continue
                 items = play.world.list_player_items(play.auth.player_character.id)
                 if not items:
                     output_fn("You are carrying nothing.")
@@ -223,6 +239,15 @@ def run_session(
                 continue
 
             if play is not None:
+                if play.in_player_chat:
+                    result = play.handle_player_chat(line)
+                    output_fn(result.reply)
+                    continue
+                entered = play.try_begin_player_chat(line)
+                if entered is not None:
+                    output_fn(entered.message)
+                    _record("assistant", entered.message)
+                    continue
                 result = play.handle_action(line)
                 output_fn(result.reply)
                 continue

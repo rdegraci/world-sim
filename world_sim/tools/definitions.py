@@ -96,3 +96,27 @@ PLAY_TOOLS: list[dict[str, Any]] = [
         },
     },
 ]
+
+PLAYER_CHAT_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "end_player_chat",
+            "description": (
+                "End the focused one-on-one Player Chat loop and return the player "
+                "to normal play_mode. Use when the conversation is over or the player "
+                "clearly wants to stop talking."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "reason": {
+                        "type": "string",
+                        "description": "Optional short reason the conversation ends.",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+]

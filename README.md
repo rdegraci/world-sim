@@ -16,6 +16,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Grounded `play_mode`, admin `edit_mode`, admin sandboxed `chat_mode`
 - World Builder companion: propose / preview / validate / apply (+ `propose_from_brief`)
 - Richer admin `edit_mode`: `create_room_lore` / `create_item_lore` / `create_npc` drafts, list filters, delete guards
+- Focused in-play Player Chat (`talk to <npc>` / `end_chat`) — conversation-only
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
@@ -23,7 +24,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - FastAPI / WebSockets / multiplayer
 - Broad CRUD / large-scale world editing beyond Builder + edit_mode
 - Advanced memory and broad semantic retrieval
-- Focused in-play Player Chat with inventory mutation
+- Player Chat inventory handoff / barter
 - Dynamic frontier expansion; unsupervised Builder apply (Exp-007)
 
 ## Project Structure
@@ -142,6 +143,19 @@ go north
 go east
 examine mrs hale
 ```
+
+Focused in-play Player Chat (any player; present NPC only — not admin `chat_mode`):
+
+```text
+go north
+go east
+talk to Mrs. Hale
+What do you know about this study?
+end_chat
+look
+```
+
+While talking, the prompt is `talk>` and lines go to that NPC. `end_chat` returns to normal play. No inventory transfers happen inside this loop.
 
 ```bash
 world-sim

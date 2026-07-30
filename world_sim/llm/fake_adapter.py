@@ -38,6 +38,11 @@ class FakeAdapter:
                 tool_calls=[],
             )
 
+        if "## Active Loop: Player Chat" in system or any(
+            "PLAYER CHAT CONTEXT" in message.content for message in messages
+        ):
+            return self._player_chat_response(content)
+
         if "Create a reviewable system lore draft" in content:
             prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
             prompt_text = prompt_match.group(1).strip() if prompt_match else content
@@ -195,6 +200,65 @@ class FakeAdapter:
             text=(
                 "You pause and take in what is actually here. Nothing shifts unless "
                 "you move, look, wait, or take something present."
+            ),
+            tool_calls=[],
+        )
+
+    def _player_chat_response(self, content: str) -> LLMResponse:
+        lower = content.lower()
+        if any(
+            phrase in lower
+            for phrase in (
+                "give you the key",
+                "take my brass key",
+                "i hand you",
+                "here, take this",
+                "transfer the",
+            )
+        ):
+            return LLMResponse(
+                text=(
+                    "Mrs. Hale: I hear what you mean, but I will not take or give "
+                    "objects as settled fact from this talk alone. What we each "
+                    "carry stays as the house records it."
+                ),
+                tool_calls=[],
+            )
+        if any(
+            phrase in lower
+            for phrase in (
+                "there is a dragon",
+                "secret elevator",
+                "hidden spaceship",
+                "i open a portal",
+            )
+        ):
+            return LLMResponse(
+                text=(
+                    "Mrs. Hale: I see no such thing here, and I will not agree that "
+                    "it is present. The manor keeps only what is recorded.\n"
+                    "DM: That fact is not in current world state."
+                ),
+                tool_calls=[],
+            )
+        if any(
+            phrase in lower
+            for phrase in ("goodbye", "i should go", "end this", "stop talking")
+        ):
+            return LLMResponse(
+                text="Mrs. Hale: Of course. We can speak again when you wish.",
+                tool_calls=[
+                    ToolCall(
+                        id=str(uuid4()),
+                        name="end_player_chat",
+                        arguments={"reason": "farewell"},
+                    )
+                ],
+            )
+        return LLMResponse(
+            text=(
+                "Mrs. Hale: The Quiet Manor keeps its rooms carefully. "
+                "Ask me about what is present, and I will answer as I can."
             ),
             tool_calls=[],
         )

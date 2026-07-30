@@ -29,3 +29,12 @@ def compose_edit_system_prompt() -> str:
 def compose_chat_system_prompt() -> str:
     """Compose core + chat_mode overlay."""
     return f"{load_prompt_file('core')}\n\n{load_prompt_file('chat_mode')}"
+
+
+def compose_player_chat_system_prompt() -> str:
+    """Compose core + play_mode + npc_chat for focused in-play NPC conversation."""
+    return (
+        f"{load_prompt_file('core')}\n\n"
+        f"{load_prompt_file('play_mode')}\n\n"
+        f"{load_prompt_file('npc_chat')}"
+    )
