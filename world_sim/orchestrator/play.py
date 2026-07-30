@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
+from world_sim.authority import WorldAuthority
 from world_sim.config import WorldExpansionSettings
 from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import WorldStore
@@ -41,29 +42,34 @@ class PlayOrchestrator:
     def __init__(
         self,
         *,
-        world: WorldStore,
+        world: WorldAuthority | WorldStore,
         lore: ChromaManager,
         llm: LLMAdapter,
         user_store: UserStore,
         auth: AuthContext,
         expansion: WorldExpansionSettings | None = None,
     ) -> None:
-        self.world = world
+        # Play mutations always go through WorldAuthority (SQLite backend today).
+        if isinstance(world, WorldAuthority):
+            self.authority = world
+        else:
+            self.authority = WorldAuthority(world)
+        self.world = self.authority
         self.lore = lore
         self.llm = llm
         self.user_store = user_store
         self.auth = auth
         self.expansion = expansion or WorldExpansionSettings()
-        self.context_builder = ContextBuilder(world, lore)
+        self.context_builder = ContextBuilder(self.authority.store, lore)
         self.tools = PlayTools(
-            world,
+            self.authority,
             lore,
             player_character_id=auth.player_character.id,
             expansion=self.expansion,
         )
         self.system_prompt = compose_play_system_prompt()
         self.player_chat = PlayerChatOrchestrator(
-            world=world,
+            world=self.authority.store,
             lore=lore,
             llm=llm,
             user_store=user_store,
@@ -89,7 +95,7 @@ class PlayOrchestrator:
         if room_id is None:
             return "You are not placed in the world yet."
         return present_room(
-            self.world,
+            self.authority.store,
             self.lore,
             player_character_id=self.auth.player_character.id,
             room_id=room_id,

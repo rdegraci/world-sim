@@ -6,6 +6,7 @@ import sys
 
 from world_sim.auth.onboarding import AuthError, authenticate
 from world_sim.config import ConfigError, Settings, load_settings
+from world_sim.authority import WorldAuthority
 from world_sim.db.draft_store import DraftStore
 from world_sim.db.sqlite_manager import SqliteManager
 from world_sim.db.user_store import UserStore
@@ -31,10 +32,11 @@ def run_app(settings: Settings) -> int:
     try:
         db.initialize_schema()
         store = UserStore(db.connection)
-        world = WorldStore(db.connection)
+        world_store = WorldStore(db.connection)
+        authority = WorldAuthority(world_store)
         drafts = DraftStore(db.connection)
         lore = ChromaManager(settings.paths.chroma_dir)
-        seeded = seed_starter_world(world, lore)
+        seeded = seed_starter_world(world_store, lore)
         logger.info(
             "SQLite ready at %s; starter world seeded=%s",
             settings.paths.sqlite_path,
@@ -53,7 +55,7 @@ def run_app(settings: Settings) -> int:
             print("\nAuthentication interrupted.", file=sys.stderr)
             return 130
 
-        ensure_player_starting_room(world, auth.player_character.id)
+        ensure_player_starting_room(world_store, auth.player_character.id)
         try:
             llm = create_llm_adapter(settings)
         except ConfigError as exc:
@@ -62,11 +64,11 @@ def run_app(settings: Settings) -> int:
 
         chat_npc_id = str(
             settings.raw_config.get("chat_npc_id")
-            or world.get_meta("chat_npc_id")
+            or world_store.get_meta("chat_npc_id")
             or DEFAULT_CHAT_NPC_ID
         )
         play = PlayOrchestrator(
-            world=world,
+            world=authority,
             lore=lore,
             llm=llm,
             user_store=store,
@@ -74,14 +76,14 @@ def run_app(settings: Settings) -> int:
             expansion=settings.world,
         )
         edit = EditOrchestrator(
-            world=world,
+            world=world_store,
             lore=lore,
             drafts=drafts,
             llm=llm,
             auth=auth,
         )
         chat = ChatOrchestrator(
-            world=world,
+            world=world_store,
             lore=lore,
             llm=llm,
             user_store=store,
@@ -94,7 +96,7 @@ def run_app(settings: Settings) -> int:
             auth.user.username,
             auth.user.role,
             auth.session.id,
-            world.get_player_room_id(auth.player_character.id),
+            world_store.get_player_room_id(auth.player_character.id),
             chat_npc_id,
         )
         return run_session(auth=auth, store=store, play=play, edit=edit, chat=chat)

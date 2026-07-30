@@ -5,14 +5,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from world_sim.authority import WorldAuthority
 from world_sim.builder.realize import RealizeError, realize_adjacent
 from world_sim.config import WorldExpansionSettings
 from world_sim.db.world_store import WorldStore
-from world_sim.lore.chroma_manager import (
-    COLLECTION_ITEM,
-    COLLECTION_ROOM,
-    ChromaManager,
-)
+from world_sim.lore.chroma_manager import ChromaManager
 from world_sim.orchestrator.presentation import (
     present_item,
     present_npc,
@@ -50,17 +47,20 @@ def normalize_direction(direction: str) -> str | None:
 
 
 class PlayTools:
-    """Validated mutation/presentation tools for play_mode."""
+    """Validated mutation/presentation tools for play_mode.
+
+    Contested-capable mutations go through :class:`WorldAuthority` only.
+    """
 
     def __init__(
         self,
-        world: WorldStore,
+        world: WorldAuthority | WorldStore,
         lore: ChromaManager,
         *,
         player_character_id: int,
         expansion: WorldExpansionSettings | None = None,
     ) -> None:
-        self.world = world
+        self.world = world if isinstance(world, WorldAuthority) else WorldAuthority(world)
         self.lore = lore
         self.player_character_id = player_character_id
         self.expansion = expansion or WorldExpansionSettings()
@@ -86,7 +86,7 @@ class PlayTools:
 
     def _present(self, room_id: str, *, force_full: bool = False) -> str:
         return present_room(
-            self.world,
+            self.world.store,
             self.lore,
             player_character_id=self.player_character_id,
             room_id=room_id,
@@ -229,7 +229,7 @@ class PlayTools:
                 message="You find nothing like that to examine here.",
             )
         text = present_item(
-            self.world,
+            self.world.store,
             self.lore,
             player_character_id=self.player_character_id,
             item_instance_id=item.id,
@@ -261,7 +261,7 @@ class PlayTools:
                 message="No such person is present here.",
             )
         text = present_npc(
-            self.world,
+            self.world.store,
             self.lore,
             player_character_id=self.player_character_id,
             npc_id=npc.npc_id,

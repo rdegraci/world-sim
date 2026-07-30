@@ -18,11 +18,13 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Richer admin `edit_mode`: `create_room_lore` / `create_item_lore` / `create_npc` drafts, list filters, delete guards
 - Focused in-play Player Chat (`talk to <npc>` / `end_chat`) — conversation-only
 - Optional dynamic frontier expansion (`world.dynamic_expansion`, default off) with campaign identity
+- Phase 3a: `WorldAuthority` port over play mutations + scene-public runtime event bus (map/presence substrate)
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
 
-- FastAPI / WebSockets / multiplayer
+- FastAPI / WebSockets / thin web / schematic map (Phase 3b)
+- Contested co-op locks and multi-session proof (Phase 4a)
 - Broad CRUD / large-scale world editing beyond Builder + edit_mode
 - Advanced memory and broad semantic retrieval
 - Player Chat inventory handoff / barter
@@ -45,6 +47,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
     ├── cli.py
     ├── config.py
     ├── auth/
+    ├── authority/
     ├── builder/
     ├── db/
     ├── llm/
@@ -198,6 +201,7 @@ The intended MVP architecture is centered on a clear separation between structur
 
 The project is designed around a split storage model:
 - SQLite stores authoritative structured data such as users, player characters, rooms, items, NPC entities, sessions, relationships, runtime state, and explicit lore-key references.
+- Play-tool mutations and authoritative structured reads used by tools go through `WorldAuthority` (SQLite-backed today via `WorldStore`). Scene-public runtime events (`character_entered_room`, `item_taken`, `room_realized`, …) persist for later map/presence clients; the CLI may ignore fan-out for now.
 - ChromaDB stores canonical lore text such as system lore, room lore, item lore, and canonical NPC lore text.
 
 A useful rule of thumb is:
