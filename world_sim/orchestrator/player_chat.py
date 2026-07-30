@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
+from world_sim.authority import MutationConflict, WorldAuthority
 from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import NpcRecord, WorldStore
 from world_sim.llm.base import ChatMessage, LLMAdapter
@@ -59,21 +60,29 @@ class PlayerChatOrchestrator:
     def __init__(
         self,
         *,
-        world: WorldStore,
+        world: WorldAuthority | WorldStore,
         lore: ChromaManager,
         llm: LLMAdapter,
         user_store: UserStore,
         auth: AuthContext,
+        connection_id: str | None = None,
     ) -> None:
-        self.world = world
+        if isinstance(world, WorldAuthority):
+            self.authority: WorldAuthority | None = world
+            self.world: WorldStore = world.store
+        else:
+            self.authority = None
+            self.world = world
         self.lore = lore
         self.llm = llm
         self.user_store = user_store
         self.auth = auth
+        self.connection_id = connection_id
         self.system_prompt = compose_player_chat_system_prompt()
         self.active_npc_id: str | None = None
         self._history: list[ChatMessage] = []
         self._logger = get_logger("player_chat")
+        self._lease_held = False
 
     @property
     def active(self) -> bool:
@@ -102,6 +111,17 @@ class PlayerChatOrchestrator:
         return self._begin(npc)
 
     def _begin(self, npc: NpcRecord) -> PlayerChatEnterResult:
+        if self.authority is not None:
+            try:
+                self.authority.acquire_player_chat_lease(
+                    npc.npc_id,
+                    self.auth.player_character.id,
+                    connection_id=self.connection_id,
+                )
+            except MutationConflict as exc:
+                return PlayerChatEnterResult(ok=False, message=exc.message, npc_id=npc.npc_id)
+            self._lease_held = True
+
         self.active_npc_id = npc.npc_id
         self._history.clear()
         description = npc_canonical_description(self.world, self.lore, npc.npc_id)
@@ -123,6 +143,12 @@ class PlayerChatOrchestrator:
         npc_id = self.active_npc_id
         npc = self.world.get_npc(npc_id) if npc_id else None
         name = npc.name if npc else (npc_id or "them")
+        if self._lease_held and self.authority is not None and npc_id:
+            self.authority.release_player_chat_lease(
+                npc_id,
+                self.auth.player_character.id,
+            )
+            self._lease_held = False
         self.active_npc_id = None
         self._history.clear()
         self._logger.info("Player Chat ended npc=%s reason=%s", npc_id, reason)
@@ -193,8 +219,7 @@ class PlayerChatOrchestrator:
 
         if not self._snapshots_equal(before, self._snapshot_world()):
             self._logger.error("Player Chat detected unexpected world mutation")
-            self.active_npc_id = None
-            self._history.clear()
+            self.end(reason="unavailable")
             return PlayerChatTurnResult(
                 reply=(
                     "Player Chat abort: unexpected world mutation detected. "

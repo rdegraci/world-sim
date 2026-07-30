@@ -173,7 +173,7 @@ def create_app(runtime: WorldRuntime) -> FastAPI:
         room_id = runtime.authority.get_player_room_id(auth.player_character.id)
         if room_id is None:
             return {"room_id": None, "roster": []}
-        return {"room_id": room_id, "roster": hub.presence_in_room(room_id)}
+        return {"room_id": room_id, **{k: v for k, v in hub.presence_payload(room_id).items() if k != "room_id"}}
 
     @app.get("/api/map")
     def map_endpoint(
@@ -265,7 +265,7 @@ def create_app(runtime: WorldRuntime) -> FastAPI:
                 "player_name": auth.player_character.name,
                 "room_id": room_id,
                 "opening": opening,
-                "presence": hub.presence_in_room(room_id) if room_id else [],
+                "presence": hub.presence_payload(room_id) if room_id else {"roster": [], "busy_npcs": []},
                 "map": build_map_view(
                     runtime.authority,
                     player_character_id=auth.player_character.id,
@@ -332,8 +332,7 @@ def create_app(runtime: WorldRuntime) -> FastAPI:
                     await websocket.send_json(
                         {
                             "type": "presence",
-                            "room_id": room,
-                            "roster": hub.presence_in_room(room) if room else [],
+                            **(hub.presence_payload(room) if room else {"room_id": None, "roster": [], "busy_npcs": []}),
                         }
                     )
                     continue
@@ -458,27 +457,15 @@ def _handle_play_line(
         }
 
     target = parse_talk_target(text)
-    if target and connection_id is not None:
-        room_id = runtime.authority.get_player_room_id(auth.player_character.id)
-        npc = runtime.authority.find_npc_by_name(target)
-        if (
-            npc is not None
-            and room_id is not None
-            and npc.current_room_id == room_id
-        ):
-            ok, reason = hub.try_claim_player_chat(connection_id, npc.npc_id)
-            if not ok:
-                return {
-                    "ok": False,
-                    "reply": reason,
-                    "tool_names": [],
-                    "room_id": room_id,
-                }
+    if connection_id is not None:
+        play.player_chat.connection_id = connection_id
 
     entered = play.try_begin_player_chat(text)
     if entered is not None:
-        if not entered.ok and connection_id:
-            hub.release_player_chat(connection_id)
+        if entered.ok and connection_id and entered.npc_id:
+            conn = hub.connections.get(connection_id)
+            if conn is not None:
+                conn.focused_npc_id = entered.npc_id
         runtime.user_store.append_transcript(auth.session.id, "assistant", entered.message)
         room_id = runtime.authority.get_player_room_id(auth.player_character.id)
         return {
@@ -487,6 +474,7 @@ def _handle_play_line(
             "tool_names": [],
             "room_id": room_id,
             "npc_id": entered.npc_id,
+            "refusal": None if entered.ok else {"code": "chat_leased"},
         }
 
     turn = play.handle_action(text)
@@ -495,7 +483,7 @@ def _handle_play_line(
     if connection_id:
         hub.update_room(connection_id, room_id)
     return {
-        "ok": True,
+        "ok": turn.ok,
         "reply": turn.reply,
         "tool_names": turn.tool_names,
         "room_id": room_id,

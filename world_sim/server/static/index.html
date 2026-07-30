@@ -271,7 +271,13 @@
         state.roomId = msg.room_id;
         $("status").textContent = `${msg.player_name} · room ${msg.room_id || "?"}`;
         appendLog(msg.opening || "");
-        renderPresence(msg.presence || []);
+        const presence = msg.presence;
+        renderPresence((presence && presence.roster) ? presence.roster : (presence || []));
+        if (presence && presence.busy_npcs && presence.busy_npcs.length) {
+          appendLog(
+            "(busy) " + presence.busy_npcs.map(n => n.name || n.npc_id).join(", ")
+          );
+        }
         renderMap(msg.map);
         return;
       }
@@ -287,6 +293,11 @@
       if (msg.type === "presence") {
         if (msg.room_id === state.roomId || !msg.room_id) {
           renderPresence(msg.roster || []);
+          if (msg.busy_npcs && msg.busy_npcs.length) {
+            appendLog(
+              "(busy) " + msg.busy_npcs.map(n => `${n.name || n.npc_id} is engaged`).join("; ")
+            );
+          }
         }
         return;
       }
@@ -301,6 +312,10 @@
           appendLog(`(scene) someone enters`);
         } else if (e.event_type === "character_left_room") {
           appendLog(`(scene) someone leaves`);
+        } else if (e.event_type === "npc_chat_busy") {
+          appendLog(`(scene) someone is engaged in conversation`);
+        } else if (e.event_type === "npc_chat_free") {
+          appendLog(`(scene) a conversation ends`);
         } else {
           appendLog(`(event) ${e.event_type}`);
         }

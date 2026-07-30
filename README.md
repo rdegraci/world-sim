@@ -20,12 +20,13 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Optional dynamic frontier expansion (`world.dynamic_expansion`, default off) with campaign identity
 - Phase 3a: `WorldAuthority` port over play mutations + scene-public runtime event bus (map/presence substrate)
 - Phase 3b: `world-sim-serve` multi-session WebSockets, in-room presence, public `say`, thin web + schematic map
+- Phase 4a: serial mutation queue, claim locks, exclusive Player Chat leases, private transcripts
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
 
-- Contested co-op locks / hardened Player Chat leases (Phase 4a)
 - Nice web / admin web polish (Phase 3b+ / CLIENT-WEB Tier B)
+- Scale-out beyond small co-op (`docs/cache/SCALING.md`)
 - Broad CRUD / large-scale world editing beyond Builder + edit_mode
 - Advanced memory and broad semantic retrieval
 - Player Chat inventory handoff / barter
@@ -108,7 +109,15 @@ Open **http://127.0.0.1:8765/** — login (signup on first use), play text, publ
 - **Presence:** live connections in your current room (display names). Leaving the room removes you from that roster for others.
 - **Map:** right-hand SVG graph (rooms = nodes, exits = edges). Yellow/you-are-here marks your room; blue dots are other players on revealed rooms. Fog hides rooms you have not seen. LOD select: **Near** (labels) vs **Overview** (dim distant nodes). Click an **adjacent** revealed room to send a move intent (`go <direction>`); the server validates.
 - **WSS:** terminate TLS in front of uvicorn for real deploys (`wss://…`); local default is `ws://`.
-- **Player Chat:** `talk to <npc>` still works on web/CLI. Until Phase 4a leases, a second live client that tries to focus the same NPC is soft-refused.
+- **Player Chat:** `talk to <npc>` uses an exclusive WorldAuthority lease. A second client sees the NPC as engaged/busy and is refused — private chat text never fans out. Presence includes `busy_npcs`.
+
+### Contested co-op demo (Phase 4a)
+
+1. Start the server: `WORLD_SIM_LLM=fake world-sim-serve --port 8765`
+2. Open two browser windows at http://127.0.0.1:8765/ and sign in as different users (or use one browser + `world-sim` CLI on the same appdir).
+3. **Race a take:** both stand in the foyer; both type `take brass key`. One gets the item; the other gets a structured runtime refusal (not an LLM-invented win). Observers in the room may see a scene `item_taken` event.
+4. **Compete for chat:** both go to the study; one types `talk to Mrs. Hale`. The other tries the same and is told she is engaged — without receiving the first player's private transcript lines.
+5. Map you-are-here stays on the server room after moves; failed takes do not move inventory.
 
 WebSocket tip (after `POST /api/login`): connect to `/ws?token=<token>` with JSON messages `{ "type": "action", "text": "look" }`, `{ "type": "say", "text": "…" }`, `{ "type": "move", "direction": "north" }`, `{ "type": "get_map", "lod": "near" }`, `{ "type": "get_presence" }`.
 

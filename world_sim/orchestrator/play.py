@@ -34,6 +34,7 @@ MOVE_PATTERN = re.compile(
 class PlayTurnResult:
     reply: str
     tool_names: list[str]
+    ok: bool = True
 
 
 class PlayOrchestrator:
@@ -69,7 +70,7 @@ class PlayOrchestrator:
         )
         self.system_prompt = compose_play_system_prompt()
         self.player_chat = PlayerChatOrchestrator(
-            world=self.authority.store,
+            world=self.authority,
             lore=lore,
             llm=llm,
             user_store=user_store,
@@ -124,6 +125,7 @@ class PlayOrchestrator:
             return PlayTurnResult(
                 reply=result.message,
                 tool_names=["move_player"],
+                ok=result.ok,
             )
 
         context = self.context_builder.build(
@@ -163,10 +165,13 @@ class PlayOrchestrator:
 
         tool_names: list[str] = []
         tool_messages: list[str] = []
+        tools_ok = True
         for call in response.tool_calls:
             tool_names.append(call.name)
             result = self.tools.execute(call.name, call.arguments)
             tool_messages.append(result.message)
+            if not result.ok:
+                tools_ok = False
             self._logger.info(
                 "Tool %s ok=%s args=%s",
                 call.name,
@@ -174,6 +179,7 @@ class PlayOrchestrator:
                 call.arguments,
             )
 
+        # Narration follows runtime results only — do not invent a different winner.
         parts = [part for part in tool_messages if part]
         if response.text.strip():
             if not parts:
@@ -192,7 +198,7 @@ class PlayOrchestrator:
             "assistant",
             reply,
         )
-        return PlayTurnResult(reply=reply, tool_names=tool_names)
+        return PlayTurnResult(reply=reply, tool_names=tool_names, ok=tools_ok)
 
     @staticmethod
     def _parse_move_direction(action: str) -> str | None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from world_sim.authority import WorldAuthority
+from world_sim.authority import MutationConflict, WorldAuthority
 from world_sim.builder.realize import RealizeError, realize_adjacent
 from world_sim.config import WorldExpansionSettings
 from world_sim.db.world_store import WorldStore
@@ -80,6 +80,13 @@ class PlayTools:
             return ToolResult(ok=False, message=f"Unknown tool '{name}'.")
         try:
             return handler(arguments)
+        except MutationConflict as exc:
+            # Contested refusal — runtime decided; LLM must narrate this result only.
+            return ToolResult(
+                ok=False,
+                message=exc.message,
+                data={"refusal": exc.to_dict()},
+            )
         except ValueError as exc:
             # In-character refusal style; no raw DB error copy.
             return ToolResult(ok=False, message=str(exc))
@@ -191,6 +198,12 @@ class PlayTools:
 
         try:
             item = self.world.take_item_from_room(self.player_character_id, item_id)
+        except MutationConflict as exc:
+            return ToolResult(
+                ok=False,
+                message=exc.message,
+                data={"refusal": exc.to_dict()},
+            )
         except ValueError:
             return ToolResult(
                 ok=False,

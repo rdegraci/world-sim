@@ -13,6 +13,8 @@ from world_sim.authority import (
     CHARACTER_LEFT_ROOM,
     CHARACTER_SAID,
     ITEM_TAKEN,
+    NPC_CHAT_BUSY,
+    NPC_CHAT_FREE,
     NPC_MOVED,
     ROOM_REALIZED,
     RuntimeEvent,
@@ -33,7 +35,7 @@ class LiveConnection:
     auth: AuthContext
     send: SendFn
     room_id: str | None = None
-    # Soft Player Chat focus (Phase 4a will harden to real leases).
+    # Player Chat lease held via WorldAuthority (Phase 4a).
     focused_npc_id: str | None = None
 
 
@@ -44,8 +46,6 @@ class SessionHub:
     authority: WorldAuthority
     connections: dict[str, LiveConnection] = field(default_factory=dict)
     tokens: dict[str, str] = field(default_factory=dict)  # token -> connection_id
-    # npc_id -> connection_id holding soft Player Chat focus
-    player_chat_focus: dict[str, str] = field(default_factory=dict)
     _loop: asyncio.AbstractEventLoop | None = None
     _subscribed: bool = False
 
@@ -98,22 +98,6 @@ class SessionHub:
         )
         return conn
 
-    def detach(self, connection_id: str) -> None:
-        conn = self.connections.pop(connection_id, None)
-        if conn is None:
-            return
-        self.tokens.pop(conn.token, None)
-        self._pending_auth.pop(conn.token, None)
-        if conn.focused_npc_id:
-            holder = self.player_chat_focus.get(conn.focused_npc_id)
-            if holder == connection_id:
-                self.player_chat_focus.pop(conn.focused_npc_id, None)
-            conn.focused_npc_id = None
-        room = conn.room_id
-        self._logger.info("Detached connection=%s", connection_id)
-        if room:
-            self._schedule(self._broadcast_presence(room))
-
     def get_by_token(self, token: str) -> LiveConnection | None:
         cid = self.tokens.get(token)
         if not cid:
@@ -160,23 +144,61 @@ class SessionHub:
             )
         return rooms
 
+    def detach(self, connection_id: str) -> None:
+        conn = self.connections.pop(connection_id, None)
+        if conn is None:
+            return
+        self.tokens.pop(conn.token, None)
+        # Keep _pending_auth so Bearer HTTP APIs still work after WS disconnect
+        # until the login session is explicitly ended.
+        self._release_connection_chat_leases(connection_id, conn.auth.player_character.id)
+        conn.focused_npc_id = None
+        room = conn.room_id
+        self._logger.info("Detached connection=%s", connection_id)
+        if room:
+            self._schedule(self._broadcast_presence(room))
+
+    def _release_connection_chat_leases(
+        self,
+        connection_id: str,
+        player_character_id: int,
+    ) -> None:
+        for claim in list(self.authority.gate.list_claims_with_prefix("chat:")):
+            if claim.meta.get("connection_id") != connection_id:
+                continue
+            npc_id = str(claim.meta.get("npc_id") or "")
+            if not npc_id:
+                continue
+            self.authority.release_player_chat_lease(npc_id, player_character_id)
+
+    def presence_payload(self, room_id: str) -> dict[str, Any]:
+        """In-room roster plus busy NPC markers (no private chat text)."""
+        return {
+            "room_id": room_id,
+            "roster": self.presence_in_room(room_id),
+            "busy_npcs": self.authority.list_busy_npcs_in_room(room_id),
+        }
+
     def try_claim_player_chat(
         self,
         connection_id: str,
         npc_id: str,
     ) -> tuple[bool, str]:
-        """Soft exclusive focus until Phase 4a leases. Second client is refused."""
-        holder = self.player_chat_focus.get(npc_id)
-        if holder is not None and holder != connection_id:
-            return (
-                False,
-                "That person is already in focused conversation with someone else. "
-                "(Player Chat leases harden in Phase 4a; for now only one live focus.)",
-            )
-        self.player_chat_focus[npc_id] = connection_id
+        """Exclusive Player Chat lease via WorldAuthority (Phase 4a)."""
+        from world_sim.authority import MutationConflict
+
         conn = self.connections.get(connection_id)
-        if conn is not None:
-            conn.focused_npc_id = npc_id
+        if conn is None:
+            return False, "Not connected."
+        try:
+            self.authority.acquire_player_chat_lease(
+                npc_id,
+                conn.auth.player_character.id,
+                connection_id=connection_id,
+            )
+        except MutationConflict as exc:
+            return False, exc.message
+        conn.focused_npc_id = npc_id
         return True, ""
 
     def release_player_chat(self, connection_id: str) -> None:
@@ -184,8 +206,10 @@ class SessionHub:
         if conn is None or not conn.focused_npc_id:
             return
         npc_id = conn.focused_npc_id
-        if self.player_chat_focus.get(npc_id) == connection_id:
-            self.player_chat_focus.pop(npc_id, None)
+        self.authority.release_player_chat_lease(
+            npc_id,
+            conn.auth.player_character.id,
+        )
         conn.focused_npc_id = None
 
     def _on_runtime_event(self, event: RuntimeEvent) -> None:
@@ -228,21 +252,18 @@ class SessionHub:
                     "Fan-out failed connection=%s", conn.connection_id
                 )
 
-        # Presence refresh when people move rooms.
+        # Presence refresh when people move rooms or NPC chat busy state changes.
         if event.event_type in {
             CHARACTER_ENTERED_ROOM,
             CHARACTER_LEFT_ROOM,
+            NPC_CHAT_BUSY,
+            NPC_CHAT_FREE,
         }:
             for room in room_ids:
                 await self._broadcast_presence(room)
 
     async def _broadcast_presence(self, room_id: str) -> None:
-        roster = self.presence_in_room(room_id)
-        message = {
-            "type": "presence",
-            "room_id": room_id,
-            "roster": roster,
-        }
+        message = {"type": "presence", **self.presence_payload(room_id)}
         for conn in self.connections.values():
             if conn.room_id != room_id:
                 continue
@@ -252,6 +273,9 @@ class SessionHub:
                 self._logger.exception(
                     "Presence send failed connection=%s", conn.connection_id
                 )
+
+        # Also refresh when chat busy/free events arrive.
+        # (Caller may invoke this from move fan-out; chat events use fan-out alone.)
 
 
 # Event types imported for documentation / future filters

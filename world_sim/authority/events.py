@@ -18,6 +18,8 @@ ROOM_REALIZED = "room_realized"
 TIME_ADVANCED = "time_advanced"
 CHARACTER_SAID = "character_said"
 PRESENCE_CHANGED = "presence_changed"
+NPC_CHAT_BUSY = "npc_chat_busy"
+NPC_CHAT_FREE = "npc_chat_free"
 
 SCENE_PUBLIC_EVENT_TYPES = frozenset(
     {
@@ -29,6 +31,8 @@ SCENE_PUBLIC_EVENT_TYPES = frozenset(
         TIME_ADVANCED,
         CHARACTER_SAID,
         PRESENCE_CHANGED,
+        NPC_CHAT_BUSY,
+        NPC_CHAT_FREE,
     }
 )
 
