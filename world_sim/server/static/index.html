@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>World-Sim</title>
+  <style>
+    :root {
+      --bg: #1a1f1c;
+      --panel: #243029;
+      --ink: #e8efe6;
+      --muted: #9aab9a;
+      --accent: #c4a35a;
+      --line: #3d4f42;
+      --you: #e8c56a;
+      --other: #7eb8da;
+      --fog: #2a3530;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background: radial-gradient(1200px 600px at 20% 0%, #2a3830, var(--bg));
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    h1 {
+      font-family: "Libre Baskerville", Georgia, serif;
+      font-weight: 400;
+      font-size: 1.4rem;
+      margin: 0;
+      letter-spacing: 0.02em;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--line);
+    }
+    header .meta { color: var(--muted); font-size: 0.85rem; }
+    main {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 1rem;
+      padding: 1rem 1.25rem 2rem;
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; }
+    }
+    .panel {
+      background: color-mix(in srgb, var(--panel) 92%, black);
+      border: 1px solid var(--line);
+      border-radius: 2px;
+      padding: 0.85rem;
+    }
+    #login {
+      max-width: 420px;
+      margin: 3rem auto;
+    }
+    label { display: block; margin: 0.6rem 0 0.25rem; color: var(--muted); font-size: 0.85rem; }
+    input, button, select {
+      font: inherit;
+      padding: 0.45rem 0.6rem;
+      border-radius: 2px;
+      border: 1px solid var(--line);
+      background: #15201a;
+      color: var(--ink);
+      width: 100%;
+    }
+    button {
+      background: var(--accent);
+      color: #1a1408;
+      border: none;
+      cursor: pointer;
+      font-weight: 600;
+      margin-top: 0.85rem;
+    }
+    button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    #log {
+      height: 280px;
+      overflow: auto;
+      white-space: pre-wrap;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 0.85rem;
+      line-height: 1.45;
+      background: #121916;
+      padding: 0.75rem;
+      border: 1px solid var(--line);
+    }
+    .row { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+    .row input { flex: 1; }
+    .row button { width: auto; margin-top: 0; }
+    #presence li { margin: 0.2rem 0; }
+    #map-wrap { overflow: auto; background: var(--fog); border: 1px solid var(--line); }
+    svg.map { display: block; min-width: 100%; }
+    .hidden { display: none !important; }
+    .hint { color: var(--muted); font-size: 0.8rem; margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>World-Sim</h1>
+    <div class="meta" id="status">Thin web · Tier A</div>
+  </header>
+
+  <section id="login" class="panel">
+    <p class="hint">Sign in to the shared world. New usernames create a player account.</p>
+    <label for="username">Username</label>
+    <input id="username" autocomplete="username" />
+    <label for="password">Password</label>
+    <input id="password" type="password" autocomplete="current-password" />
+    <button id="loginBtn" type="button">Enter world</button>
+    <p id="loginError" class="hint"></p>
+  </section>
+
+  <main id="app" class="hidden">
+    <section class="panel">
+      <div id="log" aria-live="polite"></div>
+      <div class="row">
+        <input id="action" placeholder="look · go north · take brass key · say hello" />
+        <button id="sendBtn" type="button">Send</button>
+      </div>
+      <div class="row">
+        <input id="say" placeholder="Public say (same room only)" />
+        <button id="sayBtn" class="secondary" type="button">Say</button>
+      </div>
+      <p class="hint">Map clicks send move intents. Fog hides rooms you have not seen.</p>
+    </section>
+    <aside>
+      <section class="panel" style="margin-bottom: 1rem;">
+        <strong>Who is here</strong>
+        <ul id="presence"></ul>
+      </section>
+      <section class="panel">
+        <div class="row" style="align-items: center;">
+          <strong style="flex:1">Map</strong>
+          <select id="lod" style="width: auto;">
+            <option value="near">Near</option>
+            <option value="far">Overview</option>
+          </select>
+        </div>
+        <div id="map-wrap">
+          <svg class="map" id="map" viewBox="-40 -40 400 320" role="img" aria-label="Town map"></svg>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <script>
+    const state = { token: null, ws: null, pcId: null, roomId: null };
+
+    const $ = (id) => document.getElementById(id);
+    const logEl = $("log");
+
+    function appendLog(text, cls) {
+      const line = document.createElement("div");
+      if (cls) line.className = cls;
+      line.textContent = text;
+      logEl.appendChild(line);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function renderPresence(roster) {
+      const ul = $("presence");
+      ul.innerHTML = "";
+      if (!roster || !roster.length) {
+        const li = document.createElement("li");
+        li.textContent = "(empty)";
+        li.style.color = "var(--muted)";
+        ul.appendChild(li);
+        return;
+      }
+      for (const p of roster) {
+        const li = document.createElement("li");
+        const you = p.player_character_id === state.pcId ? " · you" : "";
+        li.textContent = `${p.display_name}${you}`;
+        ul.appendChild(li);
+      }
+    }
+
+    function renderMap(map) {
+      const svg = $("map");
+      svg.innerHTML = "";
+      if (!map || !map.nodes) return;
+      const scale = 56;
+      const ox = 40;
+      const oy = 40;
+      const byId = Object.fromEntries(map.nodes.map(n => [n.room_id, n]));
+
+      for (const e of map.edges || []) {
+        const a = byId[e.from];
+        const b = byId[e.to];
+        if (!a || !b) continue;
+        const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+        line.setAttribute("x1", ox + a.x * scale);
+        line.setAttribute("y1", oy + a.y * scale);
+        line.setAttribute("x2", ox + b.x * scale);
+        line.setAttribute("y2", oy + b.y * scale);
+        line.setAttribute("stroke", "#556b5c");
+        line.setAttribute("stroke-width", "2");
+        svg.appendChild(line);
+      }
+
+      for (const n of map.nodes) {
+        const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+        g.style.cursor = "pointer";
+        const cx = ox + n.x * scale;
+        const cy = oy + n.y * scale;
+        const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        circle.setAttribute("cx", cx);
+        circle.setAttribute("cy", cy);
+        circle.setAttribute("r", n.detailed ? 12 : 6);
+        circle.setAttribute("fill", n.you_are_here ? "var(--you)" : "#3d5346");
+        circle.setAttribute("stroke", "#9bb59e");
+        g.appendChild(circle);
+        if (n.you_are_here) {
+          const you = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          you.setAttribute("cx", cx);
+          you.setAttribute("cy", cy);
+          you.setAttribute("r", 4);
+          you.setAttribute("fill", "#1a1408");
+          g.appendChild(you);
+        }
+        for (let i = 0; i < (n.others || []).length; i++) {
+          const o = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+          o.setAttribute("cx", cx + 10 + i * 6);
+          o.setAttribute("cy", cy - 10);
+          o.setAttribute("r", 3);
+          o.setAttribute("fill", "var(--other)");
+          g.appendChild(o);
+        }
+        if (n.detailed && n.name) {
+          const t = document.createElementNS("http://www.w3.org/2000/svg", "text");
+          t.setAttribute("x", cx);
+          t.setAttribute("y", cy + 26);
+          t.setAttribute("text-anchor", "middle");
+          t.setAttribute("fill", "var(--ink)");
+          t.setAttribute("font-size", "11");
+          t.textContent = n.name;
+          g.appendChild(t);
+        }
+        g.addEventListener("click", () => {
+          if (n.you_are_here) return;
+          const edge = (map.edges || []).find(
+            e => e.from === map.current_room_id && e.to === n.room_id
+          );
+          if (edge) {
+            wsSend({ type: "move", direction: edge.direction });
+          } else {
+            appendLog("(map) that room is not a direct exit from here");
+          }
+        });
+        svg.appendChild(g);
+      }
+    }
+
+    function wsSend(obj) {
+      if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+        appendLog("(not connected)");
+        return;
+      }
+      state.ws.send(JSON.stringify(obj));
+    }
+
+    function handleServerMessage(msg) {
+      if (msg.type === "hello") {
+        state.pcId = msg.player_character_id;
+        state.roomId = msg.room_id;
+        $("status").textContent = `${msg.player_name} · room ${msg.room_id || "?"}`;
+        appendLog(msg.opening || "");
+        renderPresence(msg.presence || []);
+        renderMap(msg.map);
+        return;
+      }
+      if (msg.type === "reply") {
+        appendLog(msg.reply || "");
+        if (msg.room_id) state.roomId = msg.room_id;
+        return;
+      }
+      if (msg.type === "map") {
+        renderMap(msg.map);
+        return;
+      }
+      if (msg.type === "presence") {
+        if (msg.room_id === state.roomId || !msg.room_id) {
+          renderPresence(msg.roster || []);
+        }
+        return;
+      }
+      if (msg.type === "event") {
+        const e = msg.event || {};
+        const p = e.payload || {};
+        if (e.event_type === "character_said") {
+          appendLog(`${p.display_name}: ${p.text}`);
+        } else if (e.event_type === "item_taken") {
+          appendLog(`(scene) someone takes ${p.name || "an item"}`);
+        } else if (e.event_type === "character_entered_room") {
+          appendLog(`(scene) someone enters`);
+        } else if (e.event_type === "character_left_room") {
+          appendLog(`(scene) someone leaves`);
+        } else {
+          appendLog(`(event) ${e.event_type}`);
+        }
+        return;
+      }
+      if (msg.type === "error") {
+        appendLog(`Error: ${msg.message}`);
+      }
+    }
+
+    async function doLogin() {
+      $("loginError").textContent = "";
+      const username = $("username").value.trim();
+      const password = $("password").value;
+      const res = await fetch("/api/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password, allow_signup: true }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        $("loginError").textContent = err.detail || "Login failed";
+        return;
+      }
+      const data = await res.json();
+      state.token = data.token;
+      state.pcId = data.player_character_id;
+      state.roomId = data.room_id;
+      $("login").classList.add("hidden");
+      $("app").classList.remove("hidden");
+
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(state.token)}`);
+      state.ws = ws;
+      ws.onmessage = (ev) => {
+        try { handleServerMessage(JSON.parse(ev.data)); }
+        catch { appendLog(ev.data); }
+      };
+      ws.onclose = () => appendLog("(disconnected)");
+      ws.onerror = () => appendLog("(socket error)");
+    }
+
+    $("loginBtn").onclick = () => doLogin();
+    $("sendBtn").onclick = () => {
+      const text = $("action").value.trim();
+      if (!text) return;
+      if (text.toLowerCase().startsWith("say ")) {
+        wsSend({ type: "say", text: text.slice(4) });
+      } else {
+        wsSend({ type: "action", text });
+      }
+      $("action").value = "";
+    };
+    $("sayBtn").onclick = () => {
+      const text = $("say").value.trim();
+      if (!text) return;
+      wsSend({ type: "say", text });
+      $("say").value = "";
+    };
+    $("action").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") $("sendBtn").click();
+    });
+    $("lod").onchange = () => wsSend({ type: "get_map", lod: $("lod").value });
+  </script>
+</body>
+</html>

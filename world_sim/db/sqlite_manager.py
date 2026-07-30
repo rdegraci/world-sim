@@ -205,9 +205,10 @@ class SqliteManager:
     def connect(self) -> sqlite3.Connection:
         if self._connection is None:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
-            connection = sqlite3.connect(self.db_path)
+            connection = sqlite3.connect(self.db_path, check_same_thread=False)
             connection.row_factory = sqlite3.Row
             connection.execute("PRAGMA foreign_keys = ON")
+            connection.execute("PRAGMA journal_mode = WAL")
             self._connection = connection
         return self._connection
 

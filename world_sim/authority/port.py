@@ -8,6 +8,7 @@ from world_sim.authority.bus import RuntimeEventBus
 from world_sim.authority.events import (
     CHARACTER_ENTERED_ROOM,
     CHARACTER_LEFT_ROOM,
+    CHARACTER_SAID,
     ITEM_TAKEN,
     NPC_MOVED,
     ROOM_REALIZED,
@@ -192,6 +193,31 @@ class WorldAuthority:
             ROOM_REALIZED,
             payload,
             room_ids=room_ids,
+        )
+
+    def say_public(
+        self,
+        *,
+        player_character_id: int,
+        display_name: str,
+        room_id: str,
+        text: str,
+    ) -> RuntimeEvent:
+        """Emit scene-public speech in a room (not a private transcript share)."""
+        cleaned = " ".join(text.split()).strip()
+        if not cleaned:
+            raise ValueError("Say what?")
+        if len(cleaned) > 500:
+            cleaned = cleaned[:497] + "…"
+        return self.emit_runtime_event(
+            CHARACTER_SAID,
+            {
+                "player_character_id": player_character_id,
+                "display_name": display_name,
+                "room_id": room_id,
+                "text": cleaned,
+            },
+            room_ids=(room_id,),
         )
 
     # --- Authoritative reads used by tools / presentation (delegate) ---

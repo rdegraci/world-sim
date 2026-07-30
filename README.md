@@ -8,7 +8,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 
 ### Implemented now
 
-- Packaged CLI commands: `world-sim`, `world-builder`
+- Packaged CLI commands: `world-sim`, `world-builder`, `world-sim-serve`
 - Appdir bootstrap, `.env` / `config.yaml`, startup logging
 - Auth (signup/login + admin from `ADMIN_PASSWORD`)
 - SQLite world structure + ChromaDB canonical lore with lore-key refs
@@ -19,12 +19,13 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Focused in-play Player Chat (`talk to <npc>` / `end_chat`) — conversation-only
 - Optional dynamic frontier expansion (`world.dynamic_expansion`, default off) with campaign identity
 - Phase 3a: `WorldAuthority` port over play mutations + scene-public runtime event bus (map/presence substrate)
+- Phase 3b: `world-sim-serve` multi-session WebSockets, in-room presence, public `say`, thin web + schematic map
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
 
-- FastAPI / WebSockets / thin web / schematic map (Phase 3b)
-- Contested co-op locks and multi-session proof (Phase 4a)
+- Contested co-op locks / hardened Player Chat leases (Phase 4a)
+- Nice web / admin web polish (Phase 3b+ / CLIENT-WEB Tier B)
 - Broad CRUD / large-scale world editing beyond Builder + edit_mode
 - Advanced memory and broad semantic retrieval
 - Player Chat inventory handoff / barter
@@ -55,7 +56,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
     ├── models/
     ├── orchestrator/
     ├── prompts/
-    ├── server/
+    ├── server/          # CLI session loop + Phase 3b web/WS
     ├── tools/
     └── utils/
 ```
@@ -73,7 +74,7 @@ Clone the repository and install it in editable mode:
 pip install -e .
 ```
 
-Runtime dependencies include `platformdirs`, `python-dotenv`, `PyYAML`, `chromadb`, and `openai` (for the Grok-compatible API client). FastAPI/WebSockets remain deferred.
+Runtime dependencies include `platformdirs`, `python-dotenv`, `PyYAML`, `chromadb`, `openai` / `anthropic`, and `fastapi` + `uvicorn` (Phase 3b multi-session server).
 
 ## Usage
 
@@ -84,13 +85,32 @@ On first run, World-Sim creates platformdirs locations for the `world-sim` app, 
 3. Edit the generated `.env` and set:
    - `GROK_API_KEY` (required unless using offline fake LLM)
    - `ADMIN_PASSWORD` (required only if you log in as `admin`)
-4. Run `world-sim` again.
+4. Run `world-sim` again (CLI) and/or `world-sim-serve` (thin web).
 
 Offline / test play without calling Grok:
 
 ```bash
 WORLD_SIM_LLM=fake world-sim
 ```
+
+### Multi-session thin web (Phase 3b)
+
+Same appdir SQLite/Chroma world as the CLI. Start the server:
+
+```bash
+WORLD_SIM_LLM=fake world-sim-serve --host 127.0.0.1 --port 8765
+```
+
+Open **http://127.0.0.1:8765/** — login (signup on first use), play text, public **Say**, **Who is here** presence, and the schematic **Map**.
+
+- **Two browser clients:** open two windows/profiles, sign in as different users; both should see each other under **Who is here** when in the same room; a `take` or `say` in that room fans out as a scene event (not a shared transcript).
+- **CLI + web:** run `world-sim` against the same appdir while `world-sim-serve` is up (SQLite WAL). Both use `WorldAuthority` / the same DB. Contested races harden in Phase 4a — avoid simultaneous writes to the same item until then.
+- **Presence:** live connections in your current room (display names). Leaving the room removes you from that roster for others.
+- **Map:** right-hand SVG graph (rooms = nodes, exits = edges). Yellow/you-are-here marks your room; blue dots are other players on revealed rooms. Fog hides rooms you have not seen. LOD select: **Near** (labels) vs **Overview** (dim distant nodes). Click an **adjacent** revealed room to send a move intent (`go <direction>`); the server validates.
+- **WSS:** terminate TLS in front of uvicorn for real deploys (`wss://…`); local default is `ws://`.
+- **Player Chat:** `talk to <npc>` still works on web/CLI. Until Phase 4a leases, a second live client that tries to focus the same NPC is soft-refused.
+
+WebSocket tip (after `POST /api/login`): connect to `/ws?token=<token>` with JSON messages `{ "type": "action", "text": "look" }`, `{ "type": "say", "text": "…" }`, `{ "type": "move", "direction": "north" }`, `{ "type": "get_map", "lod": "near" }`, `{ "type": "get_presence" }`.
 
 After login you start in the Quiet Manor foyer. Useful actions:
 

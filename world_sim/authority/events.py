@@ -16,6 +16,8 @@ ITEM_TAKEN = "item_taken"
 NPC_MOVED = "npc_moved"
 ROOM_REALIZED = "room_realized"
 TIME_ADVANCED = "time_advanced"
+CHARACTER_SAID = "character_said"
+PRESENCE_CHANGED = "presence_changed"
 
 SCENE_PUBLIC_EVENT_TYPES = frozenset(
     {
@@ -25,6 +27,8 @@ SCENE_PUBLIC_EVENT_TYPES = frozenset(
         NPC_MOVED,
         ROOM_REALIZED,
         TIME_ADVANCED,
+        CHARACTER_SAID,
+        PRESENCE_CHANGED,
     }
 )
 

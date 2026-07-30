@@ -15,11 +15,16 @@ dependencies = [
     "chromadb>=0.5",
     "openai>=1.40",
     "anthropic>=0.40",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "httpx>=0.27",
+    "websockets>=12.0",
 ]
 
 [project.scripts]
 world-sim = "world_sim.cli:main"
 world-builder = "world_sim.builder.cli:main"
+world-sim-serve = "world_sim.server.web_main:main"
 
 [tool.setuptools]
 package-dir = {"" = "."}
@@ -27,3 +32,6 @@ package-dir = {"" = "."}
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["world_sim*"]
+
+[tool.setuptools.package-data]
+world_sim = ["server/static/*"]
