@@ -160,6 +160,7 @@ class PlayTools:
                 stub,
                 settings=self.expansion,
                 realized_this_session=self.realized_this_session,
+                actor_player_character_id=self.player_character_id,
             )
         except RealizeError as exc:
             return ToolResult(
@@ -168,6 +169,12 @@ class PlayTools:
                     f"You press toward that way, but the house will not open it. "
                     f"({exc})"
                 ),
+            )
+        except MutationConflict as exc:
+            return ToolResult(
+                ok=False,
+                message=exc.message,
+                data={"refusal": exc.to_dict()},
             )
 
         self.realized_this_session += 1

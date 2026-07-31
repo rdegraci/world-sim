@@ -58,6 +58,71 @@ def _auth(users: UserStore, authority: WorldAuthority, name: str) -> AuthContext
     return AuthContext(user=user, player_character=player, session=session)
 
 
+def test_contested_frontier_realize_serial(
+    authority_runtime: tuple[UserStore, WorldAuthority, ChromaManager],
+) -> None:
+    """Two concurrent stub realizes — one durable room, no SQLite race outside the gate."""
+    from world_sim.lore.chroma_manager import COLLECTION_ROOM
+
+    users, authority, lore = authority_runtime
+    alice = _auth(users, authority, "alice")
+    bob = _auth(users, authority, "bob")
+    lore.upsert_lore(
+        COLLECTION_ROOM,
+        "room:garden",
+        "A walled kitchen garden of damp earth and clipped rosemary.",
+    )
+    authority.upsert_frontier_stub(
+        stub_id="stub_hallway_west_garden",
+        from_room_id="hallway",
+        direction="west",
+        target_room_id="garden",
+        target_name="Kitchen Garden",
+        lore_key="room:garden",
+        return_direction="east",
+    )
+    stub = authority.get_frontier_stub("stub_hallway_west_garden")
+    assert stub is not None
+    settings = WorldExpansionSettings(dynamic_expansion=True)
+    barrier = threading.Barrier(2)
+    results: dict[str, object] = {}
+
+    def attempt(label: str, pc_id: int) -> None:
+        barrier.wait()
+        try:
+            done = authority.realize_frontier_stub(
+                lore,
+                stub,
+                settings=settings,
+                actor_player_character_id=pc_id,
+            )
+            results[label] = ("ok", done.status, done.target_room_id)
+        except MutationConflict as exc:
+            results[label] = ("conflict", exc.code)
+        except Exception as exc:  # noqa: BLE001
+            results[label] = ("error", str(exc))
+
+    t1 = threading.Thread(target=attempt, args=("alice", alice.player_character.id))
+    t2 = threading.Thread(target=attempt, args=("bob", bob.player_character.id))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert all(v[0] in {"ok", "conflict"} for v in results.values())
+    assert any(v[0] == "ok" for v in results.values())
+    garden = authority.get_room("garden")
+    assert garden is not None
+    assert garden.lore_key == "room:garden"
+    refreshed = authority.get_frontier_stub("stub_hallway_west_garden")
+    assert refreshed is not None and refreshed.status == "realized"
+    assert authority.list_exits("hallway").get("west") == "garden"
+    events = [
+        e for e in authority.list_runtime_events(event_type="room_realized", limit=20)
+    ]
+    assert len(events) >= 1
+
+
 def test_contested_take_one_wins_one_fails(
     authority_runtime: tuple[UserStore, WorldAuthority, ChromaManager],
 ) -> None:

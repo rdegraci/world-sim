@@ -11,6 +11,7 @@ from world_sim.authority.arbitration import (
     exit_resource,
     holder_for_player,
     item_resource,
+    stub_resource,
 )
 from world_sim.authority.bus import RuntimeEventBus
 from world_sim.authority.events import (
@@ -25,13 +26,15 @@ from world_sim.authority.events import (
     TIME_ADVANCED,
     RuntimeEvent,
 )
-from world_sim.config import MemorySettings
+from world_sim.config import MemorySettings, WorldExpansionSettings
 from world_sim.db.world_store import (
+    FrontierStub,
     ItemInstanceRecord,
     MemoryRecord,
     Room,
     WorldStore,
 )
+from world_sim.lore.chroma_manager import ChromaManager
 
 
 class WorldAuthority:
@@ -272,6 +275,77 @@ class WorldAuthority:
                 payload,
                 room_ids=room_ids,
             )
+
+        return self._gate.run_serial(_apply)
+
+    def realize_frontier_stub(
+        self,
+        lore: ChromaManager,
+        stub: FrontierStub,
+        *,
+        settings: WorldExpansionSettings,
+        realized_this_session: int = 0,
+        actor_player_character_id: int | None = None,
+    ) -> FrontierStub:
+        """Realize a pending frontier stub under the serial gate + stub/exit claims.
+
+        Structure writes go through Builder validate/apply against SQLite while
+        holding the mutation lock so concurrent stub crosses cannot race.
+        Idempotent if another session already realized the stub.
+        """
+        from world_sim.builder.realize import RealizeError, apply_realize_adjacent
+
+        def _apply() -> FrontierStub:
+            current = self._store.get_frontier_stub(stub.stub_id)
+            if current is None:
+                raise RealizeError(f"Stub '{stub.stub_id}' is missing.")
+
+            holder = (
+                holder_for_player(actor_player_character_id)
+                if actor_player_character_id is not None
+                else "system:realize"
+            )
+            res_stub = stub_resource(current.stub_id)
+            res_exit = exit_resource(current.from_room_id, current.direction)
+
+            if not self._gate.try_claim(res_stub, holder):
+                raise MutationConflict(
+                    "stub_claimed",
+                    "That frontier is settling for someone else — try again.",
+                    resource=res_stub,
+                )
+            if not self._gate.try_claim(res_exit, holder):
+                self._gate.release_claim(res_stub, holder)
+                raise MutationConflict(
+                    "exit_claimed",
+                    "That way is crowded for a moment — try again.",
+                    resource=res_exit,
+                )
+            try:
+
+                def _emit(
+                    payload: dict[str, Any],
+                    *,
+                    room_ids: tuple[str, ...] = (),
+                ) -> None:
+                    self.emit_runtime_event(
+                        ROOM_REALIZED,
+                        payload,
+                        room_ids=room_ids,
+                    )
+
+                return apply_realize_adjacent(
+                    self._store,
+                    lore,
+                    current,
+                    settings=settings,
+                    realized_this_session=realized_this_session,
+                    world=self,
+                    emit_event=_emit,
+                )
+            finally:
+                self._gate.release_claim(res_exit, holder)
+                self._gate.release_claim(res_stub, holder)
 
         return self._gate.run_serial(_apply)
 

@@ -115,5 +115,9 @@ def chat_resource(npc_id: str) -> str:
     return f"chat:{npc_id}"
 
 
+def stub_resource(stub_id: str) -> str:
+    return f"stub:{stub_id}"
+
+
 def holder_for_player(player_character_id: int) -> str:
     return f"pc:{int(player_character_id)}"

@@ -107,7 +107,7 @@ WORLD_SIM_LLM=fake world-sim-serve --host 127.0.0.1 --port 8765
 Open **http://127.0.0.1:8765/** — login (signup on first use), play text, public **Say**, **Who is here** presence, and the schematic **Map**.
 
 - **Two browser clients:** open two windows/profiles, sign in as different users; both should see each other under **Who is here** when in the same room; a `take` or `say` in that room fans out as a scene event (not a shared transcript).
-- **CLI + web:** run `world-sim` against the same appdir while `world-sim-serve` is up (SQLite WAL). Both use `WorldAuthority` / the same DB. Contested races harden in Phase 4a — avoid simultaneous writes to the same item until then.
+- **CLI + web:** run `world-sim` against the same appdir while `world-sim-serve` is up (SQLite WAL). Both use `WorldAuthority` / the same DB. Contested item/exit/chat (and frontier realize) go through the serial mutation gate.
 - **Presence:** live connections in your current room (display names). Leaving the room removes you from that roster for others.
 - **Map:** right-hand SVG graph (rooms = nodes, exits = edges). Yellow/you-are-here marks your room; blue dots are other players on revealed rooms. Fog hides rooms you have not seen. LOD select: **Near** (labels) vs **Overview** (dim distant nodes). Click an **adjacent** revealed room to send a move intent (`go <direction>`); the server validates.
 - **WSS:** terminate TLS in front of uvicorn for real deploys (`wss://…`); local default is `ws://`.
