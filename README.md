@@ -23,6 +23,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Phase 4a: serial mutation queue, claim locks, exclusive Player Chat leases, private transcripts
 - Phase 4b1 (optional): bounded per-character / NPC-about-player memory (`memory.enabled`, default off)
 - Phase 4b2 (optional): semantic retrieval assist for Builder discovery / play context (`retrieval.enabled`, default off)
+- Optional Player Chat lore guard (`player_chat.lore_guard`, default off) — judge replies vs config must/must_not + NPC lore
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
@@ -375,13 +376,20 @@ retrieval:
   top_k: 5
   play_context: true
   builder_discover: true
+player_chat:
+  lore_guard: false
+  max_regenerations: 1
 ```
 
 Supported providers: `grok` (default), `openai`, `anthropic`. Set the matching API key in `.env`.
 
 Phase **4b1** bounded memory stays off until `memory.enabled: true`. Records are runtime SQLite state (capped, private per character); they do not rewrite Chroma canon.
 
-Phase **4b2** semantic retrieval stays off until `retrieval.enabled: true`. It may suggest related lore for Builder (`discover_lore` / `propose_discovered`) and optional play context assist — every hit is re-checked with `get_lore`; ungrounded keys are dropped. Authoritative facts still come from SQLite + explicit lore-keys.Example `.env` secrets:
+Phase **4b2** semantic retrieval stays off until `retrieval.enabled: true`. It may suggest related lore for Builder (`discover_lore` / `propose_discovered`) and optional play context assist — every hit is re-checked with `get_lore`; ungrounded keys are dropped. Authoritative facts still come from SQLite + explicit lore-keys.
+
+Optional **Player Chat lore guard** (`player_chat.lore_guard`, default off) judges each NPC reply against tunable `must` / `must_not` policy plus that NPC's lore; failed replies regenerate then refuse in character.
+
+Example `.env` secrets:
 
 ```dotenv
 GROK_API_KEY=your_grok_api_key_here

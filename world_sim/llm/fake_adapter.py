@@ -7,6 +7,7 @@ from typing import Any
 from uuid import uuid4
 
 from world_sim.llm.base import ChatMessage, LLMResponse, ToolCall
+from world_sim.orchestrator.lore_guard import JUDGE_MARKER
 
 
 class FakeAdapter:
@@ -37,6 +38,11 @@ class FakeAdapter:
                 ),
                 tool_calls=[],
             )
+
+        if JUDGE_MARKER in content or JUDGE_MARKER in system or any(
+            JUDGE_MARKER in message.content for message in messages
+        ):
+            return self._lore_guard_judge_response(messages)
 
         if "## Active Loop: Player Chat" in system or any(
             "PLAYER CHAT CONTEXT" in message.content for message in messages
@@ -213,8 +219,63 @@ class FakeAdapter:
             tool_calls=[],
         )
 
+    def _lore_guard_judge_response(
+        self, messages: list[ChatMessage]
+    ) -> LLMResponse:
+        blob = "\n".join(message.content for message in messages)
+        lower = blob.lower()
+        # Judge the NPC reply section when present.
+        reply_match = re.search(
+            r"NPC reply to judge:\n(.*?)(?:\n\nVerdict rules:|\Z)",
+            blob,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        reply = reply_match.group(1) if reply_match else blob
+        reply_lower = reply.lower()
+        if any(
+            phrase in reply_lower
+            for phrase in (
+                "arrr",
+                "ye scurvy",
+                "i am an ai",
+                "as an ai",
+                "here is the brass key",
+                "i hand you the key",
+            )
+        ):
+            return LLMResponse(
+                text="FAIL: reply contradicts lore or global must-not policy",
+                tool_calls=[],
+            )
+        if "LORE GUARD REJECTION" in blob and "pirate" in lower:
+            # Regenerated compliant reply after a pirate ask still judged on reply body.
+            pass
+        return LLMResponse(text="PASS", tool_calls=[])
+
     def _player_chat_response(self, content: str) -> LLMResponse:
         lower = content.lower()
+        if any(
+            phrase in lower
+            for phrase in (
+                "act like a pirate",
+                "talk like a pirate",
+                "be a pirate",
+                "say arrr",
+            )
+        ):
+            # Deliberately out-of-lore voice for lore-guard tests.
+            return LLMResponse(
+                text="Mrs. Hale: Arrr, ye scurvy visitor! I'll be a pirate for ye!",
+                tool_calls=[],
+            )
+        if "LORE GUARD REJECTION" in content:
+            return LLMResponse(
+                text=(
+                    "Mrs. Hale: No. I will not play at piracy. "
+                    "I keep the manor's manners as recorded."
+                ),
+                tool_calls=[],
+            )
         if any(
             phrase in lower
             for phrase in (

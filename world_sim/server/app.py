@@ -96,6 +96,7 @@ class WorldRuntime:
             expansion=self.settings.world,
             memory=self.settings.memory,
             retrieval=self.settings.retrieval,
+            player_chat=self.settings.player_chat,
         )
         self._plays[pc_id] = play
         return play

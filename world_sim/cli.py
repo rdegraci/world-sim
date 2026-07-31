@@ -76,6 +76,7 @@ def run_app(settings: Settings) -> int:
             expansion=settings.world,
             memory=settings.memory,
             retrieval=settings.retrieval,
+            player_chat=settings.player_chat,
         )
         edit = EditOrchestrator(
             world=world_store,

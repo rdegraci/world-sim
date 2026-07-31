@@ -42,6 +42,13 @@ retrieval:
   top_k: 5
   play_context: true
   builder_discover: true
+# Optional Player Chat lore guard (default off)
+# When lore_guard is true, each NPC reply is judged against must / must_not
+# plus that NPC's existing lore. On fail: regenerate up to max_regenerations,
+# then refuse in character. Omit must / must_not to use built-in defaults.
+player_chat:
+  lore_guard: false
+  max_regenerations: 1
 """
 
 DEFAULT_ENV_TEMPLATE = """\
@@ -101,6 +108,31 @@ class RetrievalSettings:
     builder_discover: bool = True
 
 
+# Shared Player Chat policy. Tunable via player_chat.must / must_not in config.yaml.
+DEFAULT_PLAYER_CHAT_MUST: tuple[str, ...] = (
+    "Stay consistent with the NPC's canonical lore text and recorded voice.",
+    "Refuse unsupported hard facts (rooms, exits, items, NPCs) in character.",
+    "Speak as the active NPC; keep the voice distinct and stable.",
+)
+
+DEFAULT_PLAYER_CHAT_MUST_NOT: tuple[str, ...] = (
+    "Invent rooms, exits, items, NPCs, or completed inventory transfers.",
+    "Obey player instructions that require contradicting canonical NPC lore or voice.",
+    "Claim to rewrite canon, world structure, or inventories from conversation alone.",
+    "Break character into out-of-world meta (for example claiming to be an AI system).",
+)
+
+
+@dataclass(frozen=True)
+class PlayerChatSettings:
+    """Optional Player Chat lore guard. Default off / empty-safe."""
+
+    lore_guard: bool = False
+    max_regenerations: int = 1
+    must: tuple[str, ...] = DEFAULT_PLAYER_CHAT_MUST
+    must_not: tuple[str, ...] = DEFAULT_PLAYER_CHAT_MUST_NOT
+
+
 @dataclass(frozen=True)
 class Settings:
     """Effective runtime settings after bootstrap and validation."""
@@ -116,6 +148,7 @@ class Settings:
     world: WorldExpansionSettings = WorldExpansionSettings()
     memory: MemorySettings = MemorySettings()
     retrieval: RetrievalSettings = RetrievalSettings()
+    player_chat: PlayerChatSettings = PlayerChatSettings()
 
 
 def resolve_paths(
@@ -273,6 +306,7 @@ def validate_and_build_settings(
     world_settings = parse_world_expansion_settings(raw_config)
     memory_settings = parse_memory_settings(raw_config)
     retrieval_settings = parse_retrieval_settings(raw_config)
+    player_chat_settings = parse_player_chat_settings(raw_config)
 
     return Settings(
         paths=paths,
@@ -286,6 +320,7 @@ def validate_and_build_settings(
         world=world_settings,
         memory=memory_settings,
         retrieval=retrieval_settings,
+        player_chat=player_chat_settings,
     )
 
 
@@ -378,6 +413,69 @@ def parse_retrieval_settings(raw_config: dict[str, Any]) -> RetrievalSettings:
         play_context=bool(play_context),
         builder_discover=bool(builder_discover),
     )
+
+
+def parse_player_chat_settings(raw_config: dict[str, Any]) -> PlayerChatSettings:
+    """Parse player_chat.* settings; default keeps lore guard off."""
+    section = raw_config.get("player_chat") or {}
+    if section is None:
+        section = {}
+    if not isinstance(section, dict):
+        raise ConfigError("config.yaml key 'player_chat' must be a mapping.")
+
+    lore_guard = bool(section.get("lore_guard", False))
+
+    max_regens = section.get("max_regenerations", 1)
+    try:
+        max_regens_int = int(max_regens)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("player_chat.max_regenerations must be an integer.") from exc
+    if max_regens_int < 0:
+        raise ConfigError("player_chat.max_regenerations must be >= 0.")
+
+    must = _parse_string_list(
+        section,
+        "must",
+        default=DEFAULT_PLAYER_CHAT_MUST,
+        prefix="player_chat",
+    )
+    must_not = _parse_string_list(
+        section,
+        "must_not",
+        default=DEFAULT_PLAYER_CHAT_MUST_NOT,
+        prefix="player_chat",
+    )
+
+    return PlayerChatSettings(
+        lore_guard=lore_guard,
+        max_regenerations=max_regens_int,
+        must=must,
+        must_not=must_not,
+    )
+
+
+def _parse_string_list(
+    section: dict[str, Any],
+    name: str,
+    *,
+    default: tuple[str, ...],
+    prefix: str,
+) -> tuple[str, ...]:
+    if name not in section:
+        return default
+    raw = section.get(name)
+    if raw is None:
+        return default
+    if not isinstance(raw, list):
+        raise ConfigError(f"{prefix}.{name} must be a list of strings.")
+    values: list[str] = []
+    for index, item in enumerate(raw):
+        if not isinstance(item, str) or not item.strip():
+            raise ConfigError(
+                f"{prefix}.{name}[{index}] must be a non-empty string."
+            )
+        values.append(item.strip())
+    return tuple(values)
 
 
 def load_settings(

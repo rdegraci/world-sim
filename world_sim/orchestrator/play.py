@@ -6,7 +6,12 @@ import re
 from dataclasses import dataclass
 
 from world_sim.authority import WorldAuthority
-from world_sim.config import MemorySettings, RetrievalSettings, WorldExpansionSettings
+from world_sim.config import (
+    MemorySettings,
+    PlayerChatSettings,
+    RetrievalSettings,
+    WorldExpansionSettings,
+)
 from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import WorldStore
 from world_sim.llm.base import ChatMessage, LLMAdapter
@@ -52,6 +57,7 @@ class PlayOrchestrator:
         expansion: WorldExpansionSettings | None = None,
         memory: MemorySettings | None = None,
         retrieval: RetrievalSettings | None = None,
+        player_chat: PlayerChatSettings | None = None,
     ) -> None:
         # Play mutations always go through WorldAuthority (SQLite backend today).
         memory_settings = memory or MemorySettings()
@@ -89,6 +95,7 @@ class PlayOrchestrator:
             llm=llm,
             user_store=user_store,
             auth=auth,
+            player_chat=player_chat or PlayerChatSettings(),
         )
         self._logger = get_logger("play")
 

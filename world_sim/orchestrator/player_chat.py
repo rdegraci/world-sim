@@ -6,6 +6,7 @@ import re
 from dataclasses import dataclass, field
 
 from world_sim.authority import MutationConflict, WorldAuthority
+from world_sim.config import PlayerChatSettings
 from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import NpcRecord, WorldStore
 from world_sim.llm.base import ChatMessage, LLMAdapter
@@ -18,6 +19,10 @@ from world_sim.lore.chroma_manager import (
 )
 from world_sim.lore.seed import SYSTEM_LORE_KEY
 from world_sim.models import AuthContext
+from world_sim.orchestrator.lore_guard import (
+    in_character_refusal,
+    judge_npc_reply,
+)
 from world_sim.orchestrator.presentation import npc_canonical_description
 from world_sim.orchestrator.prompts import compose_player_chat_system_prompt
 from world_sim.tools.definitions import PLAYER_CHAT_TOOLS
@@ -66,6 +71,7 @@ class PlayerChatOrchestrator:
         user_store: UserStore,
         auth: AuthContext,
         connection_id: str | None = None,
+        player_chat: PlayerChatSettings | None = None,
     ) -> None:
         if isinstance(world, WorldAuthority):
             self.authority: WorldAuthority | None = world
@@ -78,6 +84,7 @@ class PlayerChatOrchestrator:
         self.user_store = user_store
         self.auth = auth
         self.connection_id = connection_id
+        self.player_chat_settings = player_chat or PlayerChatSettings()
         self.system_prompt = compose_player_chat_system_prompt()
         self.active_npc_id: str | None = None
         self._history: list[ChatMessage] = []
@@ -235,6 +242,17 @@ class PlayerChatOrchestrator:
             name = npc.name if npc else "They"
             reply = f"{name}: ..."
 
+        if (
+            not ended
+            and reply
+            and self.player_chat_settings.lore_guard
+        ):
+            reply = self._guard_reply(
+                player_line=text,
+                context=context,
+                reply=reply,
+            )
+
         if ended:
             parts = [part for part in (reply, end_note) if part]
             reply = "\n\n".join(parts) if parts else end_note
@@ -244,6 +262,102 @@ class PlayerChatOrchestrator:
 
         self.user_store.append_transcript(self.auth.session.id, "assistant", reply)
         return PlayerChatTurnResult(reply=reply, ended=ended, tool_names=tool_names)
+
+    def _guard_reply(
+        self,
+        *,
+        player_line: str,
+        context: str,
+        reply: str,
+    ) -> str:
+        """Judge reply; regenerate up to max_regenerations; then refuse."""
+        assert self.active_npc_id is not None
+        npc = self.world.get_npc(self.active_npc_id)
+        npc_name = npc.name if npc else "They"
+        lore_text = npc_canonical_description(
+            self.world, self.lore, self.active_npc_id
+        )
+        settings = self.player_chat_settings
+        candidate = reply
+        attempts = settings.max_regenerations + 1
+        last_reason = "policy or lore violation"
+
+        for attempt in range(attempts):
+            verdict = judge_npc_reply(
+                self.llm,
+                settings=settings,
+                npc_name=npc_name,
+                npc_id=self.active_npc_id,
+                lore_text=lore_text,
+                player_line=player_line,
+                npc_reply=candidate,
+            )
+            if verdict.ok:
+                if attempt:
+                    self._logger.info(
+                        "Lore guard accepted regenerated reply npc=%s attempt=%s",
+                        self.active_npc_id,
+                        attempt,
+                    )
+                return candidate
+            last_reason = verdict.reason
+            self._logger.info(
+                "Lore guard rejected reply npc=%s attempt=%s reason=%s",
+                self.active_npc_id,
+                attempt,
+                last_reason,
+            )
+            if attempt >= settings.max_regenerations:
+                break
+            candidate = self._regenerate_reply(
+                player_line=player_line,
+                context=context,
+                rejected_reply=candidate,
+                reason=last_reason,
+            )
+
+        refused = in_character_refusal(npc_name)
+        self._logger.info(
+            "Lore guard refusing after retries npc=%s reason=%s",
+            self.active_npc_id,
+            last_reason,
+        )
+        return refused
+
+    def _regenerate_reply(
+        self,
+        *,
+        player_line: str,
+        context: str,
+        rejected_reply: str,
+        reason: str,
+    ) -> str:
+        messages = [
+            ChatMessage(role="system", content=context),
+            *self._history,
+            ChatMessage(role="user", content=player_line),
+            ChatMessage(role="assistant", content=rejected_reply),
+            ChatMessage(
+                role="user",
+                content=(
+                    "LORE GUARD REJECTION: Your previous reply was not accepted "
+                    f"({reason}). Reply again in character. Stay consistent with "
+                    "canonical NPC lore. Do not invent hard facts or inventories. "
+                    "Do not mention the lore guard."
+                ),
+            ),
+        ]
+        try:
+            response = self.llm.complete(
+                system=self.system_prompt,
+                messages=messages,
+                tools=PLAYER_CHAT_TOOLS,
+            )
+        except Exception as exc:
+            self._logger.exception("Lore guard regenerate failed: %s", exc)
+            return ""
+        # Ignore tools on regenerate; only the text is a candidate.
+        return (response.text or "").strip()
 
     def _find_present_npc(self, room_id: str, query: str) -> NpcRecord | None:
         needle = query.strip().lower()
