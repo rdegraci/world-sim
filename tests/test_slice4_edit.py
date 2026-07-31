@@ -201,6 +201,43 @@ def test_room_lore_edit_invalidates_presentation(
     assert "rain-soaked coats" in again
 
 
+def test_edit_lore_aliases_match_add_upsert(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, lore = runtime
+    auth = _admin_auth(user_store, world)
+    edit = _edit(runtime, auth)
+
+    system = edit.handle(
+        "edit_system_lore system:alias_bell | The alias bell rings once."
+    )
+    assert system.ok
+    assert lore.get_lore(COLLECTION_SYSTEM, "system:alias_bell") is not None
+
+    room = edit.handle(
+        "edit_room_lore foyer | The foyer smells of wet wool from the alias path."
+    )
+    assert room.ok
+    foyer = lore.get_lore(COLLECTION_ROOM, "room:foyer")
+    assert foyer is not None
+    assert "wet wool" in foyer
+
+    item = edit.handle(
+        "edit_item_lore brass_key | A brass key rewritten via edit_item_lore."
+    )
+    assert item.ok
+
+    npc = edit.handle(
+        "edit_npc_lore mrs_hale | Mrs. Hale watches the door via the lore alias."
+    )
+    assert npc.ok
+
+    # edit_npc remains rename-only and must not be swallowed by edit_npc_lore.
+    renamed = edit.handle("edit_npc mrs_hale | name=Mrs. Hale Alias")
+    assert renamed.ok
+    assert world.get_npc("mrs_hale").name == "Mrs. Hale Alias"  # type: ignore[union-attr]
+
+
 def test_item_lore_edit_keeps_instances_as_runtime(
     runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
 ) -> None:

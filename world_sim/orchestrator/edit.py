@@ -30,6 +30,7 @@ edit_mode commands (admin only):
     list_system_lore [search=...]
     view_system_lore <key>
     add_system_lore <key> | <text...>
+    edit_system_lore <key> | <text...>   (alias of add_system_lore; write or replace)
     create_system_lore <prompt...>
     delete_system_lore <key>
 
@@ -38,6 +39,7 @@ edit_mode commands (admin only):
     list_room_lore [room_id=...] [search=...]
     view_room_lore <key>
     add_room_lore <room_id> | <text...>
+    edit_room_lore <room_id> | <text...>   (alias of add_room_lore; write or replace)
     create_room_lore <room_id> <prompt...>
     delete_room_lore <key>
 
@@ -46,6 +48,7 @@ edit_mode commands (admin only):
     list_item_lore [item_id=...] [search=...]
     view_item_lore <key>
     add_item_lore <item_id> | <text...>
+    edit_item_lore <item_id> | <text...>   (alias of add_item_lore; write or replace)
     create_item_lore <item_id> <prompt...>
     delete_item_lore <key>
 
@@ -53,6 +56,7 @@ edit_mode commands (admin only):
     list_npcs [search=...]
     view_npc <npc_id>
     add_npc_lore <npc_id> | <text...>
+    edit_npc_lore <npc_id> | <text...>   (alias of add_npc_lore; write or replace)
     add_npc <npc_id> | <name> | <lore_key>[,<lore_key>...] [--in <room>]
     create_npc <prompt...>
     edit_npc <npc_id> | name=<new name>
@@ -66,10 +70,19 @@ edit_mode commands (admin only):
 
 Notes:
   - create_* stores a pending draft only; approve_draft makes it canonical.
-  - add_* is an explicit admin write (no draft).
+  - add_*_lore / edit_*_lore write or replace Chroma text (explicit admin upsert; no draft).
+  - edit_npc renames the SQLite record only; use edit_npc_lore / add_npc_lore for lore text.
   - Canon edits invalidate recap + full-description-seen for affected entities.
   - Bulk rooms/links/placements stay in world-builder.
 """
+
+# edit_*_lore aliases rewrite to add_*_lore (same upsert semantics).
+_LORE_WRITE_ALIASES: tuple[tuple[str, str], ...] = (
+    ("edit_system_lore", "add_system_lore"),
+    ("edit_room_lore", "add_room_lore"),
+    ("edit_item_lore", "add_item_lore"),
+    ("edit_npc_lore", "add_npc_lore"),
+)
 
 
 @dataclass(frozen=True)
@@ -117,6 +130,9 @@ class EditOrchestrator:
         lowered = raw.lower()
         if lowered in {"help", "edit help", "?"}:
             return EditResult(message=EDIT_HELP)
+
+        raw = self._canonicalize_lore_write_alias(raw)
+        lowered = raw.lower()
 
         if lowered.startswith("list_system_lore"):
             return self._list_lore(COLLECTION_SYSTEM, raw)
@@ -174,6 +190,7 @@ class EditOrchestrator:
             return self._add_npc(raw)
         if lowered.startswith("create_npc"):
             return self._create_npc(raw)
+        # edit_npc_lore already rewrote to add_npc_lore above.
         if lowered.startswith("edit_npc"):
             return self._edit_npc(raw)
         if lowered.startswith("delete_npc"):
@@ -183,6 +200,15 @@ class EditOrchestrator:
             ok=False,
             message="Unknown edit_mode command. Type 'help' for the constrained command set.",
         )
+
+    @staticmethod
+    def _canonicalize_lore_write_alias(raw: str) -> str:
+        """Rewrite edit_*_lore to add_*_lore so parsers and handlers stay shared."""
+        lowered = raw.lower()
+        for alias, canonical in _LORE_WRITE_ALIASES:
+            if lowered.startswith(alias):
+                return canonical + raw[len(alias) :]
+        return raw
 
     def _parse_search(self, raw: str) -> str | None:
         match = re.search(r"search=(\S+)", raw, flags=re.IGNORECASE)
