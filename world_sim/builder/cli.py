@@ -23,6 +23,8 @@ Proposals are drafts until explicit apply. Exp-007 unsupervised apply is NOT ena
 Commands:
   help
   list_lore [system|room|item|npc]
+  discover_lore <query...>
+  propose_discovered <rooms|items|npcs> <query...> [--in room_id]
   upsert_lore <lore_key> | <text...>
   list_plans
   open_plan <plan_id>
@@ -52,7 +54,12 @@ def run_builder(settings: Settings) -> int:
         db.initialize_schema()
         world = WorldStore(db.connection)
         lore = ChromaManager(settings.paths.chroma_dir)
-        session = BuilderSession(world, lore, settings.paths.data_dir)
+        session = BuilderSession(
+            world,
+            lore,
+            settings.paths.data_dir,
+            retrieval=settings.retrieval,
+        )
         logger.info(
             "World Builder ready sqlite=%s chroma=%s plans=%s/builder/plans",
             settings.paths.sqlite_path,
@@ -109,6 +116,38 @@ def dispatch(session: BuilderSession, command: str, args: list[str]) -> str:
         if not rows:
             return "(no lore entries)"
         return "\n".join(f"{coll}\t{key}\t{preview}" for coll, key, preview in rows)
+
+    if command == "discover_lore":
+        if not args:
+            raise ValueError("Usage: discover_lore <query...>")
+        return session.discover_lore(" ".join(args))
+
+    if command == "propose_discovered":
+        if len(args) < 2:
+            raise ValueError(
+                "Usage: propose_discovered <rooms|items|npcs> <query...> [--in room_id]"
+            )
+        kind = args[0]
+        rest = args[1:]
+        place_in = None
+        if "--in" in rest:
+            idx = rest.index("--in")
+            if idx + 1 >= len(rest):
+                raise ValueError("--in requires a room_id")
+            place_in = rest[idx + 1]
+            rest = rest[:idx] + rest[idx + 2 :]
+        if not rest:
+            raise ValueError("Query text required after kind.")
+        plan = session.propose_discovered(
+            " ".join(rest),
+            kind=kind,
+            place_in=place_in,
+        )
+        return (
+            f"Draft plan {plan.plan_id} updated from grounded retrieval "
+            f"({len(plan.rooms)} rooms, {len(plan.items)} items, "
+            f"{len(plan.npcs)} npcs). Gaps: {len(plan.gaps)}"
+        )
 
     if command == "upsert_lore":
         # Prefer pipe form so free text is easy: upsert_lore room:cellar | The cellar...

@@ -128,3 +128,50 @@ class ChromaManager:
             if text is not None:
                 found[key] = text
         return found
+
+    def query_similar(
+        self,
+        collection_name: str,
+        query_text: str,
+        *,
+        n_results: int = 5,
+    ) -> list[tuple[str, str | None, float | None]]:
+        """Raw Chroma similarity hits: (id, document_or_none, distance_or_none).
+
+        Assist-only. Callers must re-ground via :meth:`get_lore` before treating
+        a hit as authoritative canon.
+        """
+        if collection_name not in self._collections:
+            raise ValueError(f"Unknown lore collection: {collection_name}")
+        cleaned = " ".join(str(query_text).split()).strip()
+        if not cleaned:
+            return []
+        n = max(1, int(n_results))
+        collection = self._collections[collection_name]
+        # Cap n_results to collection size so Chroma does not error on empty/small sets.
+        try:
+            total = int(collection.count())
+        except Exception:  # noqa: BLE001 — count is best-effort
+            total = n
+        if total <= 0:
+            return []
+        n = min(n, total)
+        result = collection.query(
+            query_texts=[cleaned],
+            n_results=n,
+            include=["documents", "distances"],
+        )
+        ids_nested = result.get("ids") or [[]]
+        docs_nested = result.get("documents") or [[]]
+        dist_nested = result.get("distances") or [[]]
+        ids = list(ids_nested[0] if ids_nested else [])
+        docs = list(docs_nested[0] if docs_nested else [])
+        dists = list(dist_nested[0] if dist_nested else [])
+        hits: list[tuple[str, str | None, float | None]] = []
+        for index, key in enumerate(ids):
+            doc = docs[index] if index < len(docs) else None
+            dist = dists[index] if index < len(dists) else None
+            text = None if doc is None else str(doc)
+            distance = float(dist) if dist is not None else None
+            hits.append((str(key), text, distance))
+        return hits

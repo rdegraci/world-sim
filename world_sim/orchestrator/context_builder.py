@@ -16,6 +16,7 @@ from world_sim.lore.seed import SYSTEM_LORE_KEY
 
 if TYPE_CHECKING:
     from world_sim.authority import WorldAuthority
+    from world_sim.lore.retrieval import RetrievalAssist
 
 
 @dataclass(frozen=True)
@@ -38,21 +39,25 @@ class ContextBuilder:
         lore: ChromaManager,
         *,
         authority: WorldAuthority | None = None,
+        retrieval: RetrievalAssist | None = None,
     ) -> None:
         self.world = world
         self.lore = lore
         self.authority = authority
+        self.retrieval = retrieval
 
     def build(
         self,
         player_character_id: int,
         *,
         include_frontier_stubs: bool = False,
+        assist_query: str | None = None,
     ) -> PlayContext:
         system_lore = self.lore.get_lore(COLLECTION_SYSTEM, SYSTEM_LORE_KEY)
         room_id = self.world.get_player_room_id(player_character_id)
         room_presentation_hint = None
         room_block = "Room: (none)"
+        authoritative_keys: set[str] = {SYSTEM_LORE_KEY}
         if room_id is not None:
             room = self.world.get_room(room_id)
             room_presentation_hint = self._room_context_summary(
@@ -64,6 +69,8 @@ class ContextBuilder:
                 if room is not None
                 else None
             )
+            if room is not None:
+                authoritative_keys.add(room.lore_key)
             exits = self.world.list_exits(room_id)
             exit_lines = [f"- {direction} -> {target}" for direction, target in sorted(exits.items())]
             if include_frontier_stubs:
@@ -77,6 +84,8 @@ class ContextBuilder:
             items = self.world.list_items_in_room(room_id)
             item_lines = []
             for item in items:
+                if item.definition_key:
+                    authoritative_keys.add(item.definition_key)
                 item_lore = (
                     self.lore.get_lore(COLLECTION_ITEM, item.definition_key)
                     if item.definition_key
@@ -105,6 +114,9 @@ class ContextBuilder:
                 for item in inventory
             ]
             inventory_summary = "\n".join(inv_lines)
+            for item in inventory:
+                if item.definition_key:
+                    authoritative_keys.add(item.definition_key)
         else:
             inventory_summary = "- empty"
 
@@ -122,6 +134,20 @@ class ContextBuilder:
             if formatted:
                 memory_block = f"\n\n{formatted}"
 
+        assist_block = ""
+        if (
+            assist_query
+            and self.retrieval is not None
+            and self.retrieval.enabled
+            and self.retrieval.settings.play_context
+        ):
+            formatted_assist = self.retrieval.format_assist_block(
+                assist_query,
+                exclude_keys=authoritative_keys,
+            )
+            if formatted_assist:
+                assist_block = f"\n\n{formatted_assist}"
+
         text = (
             "AUTHORITATIVE RUNTIME CONTEXT (SQLite first, then linked lore)\n"
             f"Player character id: {player_character_id}\n"
@@ -130,11 +156,14 @@ class ContextBuilder:
             f"System lore:\n{system_lore or '(missing)'}\n\n"
             f"{room_block}\n\n"
             f"Inventory:\n{inventory_summary}"
-            f"{memory_block}\n\n"
+            f"{memory_block}"
+            f"{assist_block}\n\n"
             "Rules reminder: do not invent unsupported exits, items, or rooms. "
             "Use tools for movement, taking items, looking, examining, and time. "
             "False player assertions must be refused in-character. "
-            "Memory records are runtime state only — they do not rewrite canon lore."
+            "Memory records are runtime state only — they do not rewrite canon lore. "
+            "Retrieval assist lines are suggestions only — authoritative facts come "
+            "from SQLite placements and explicit lore_key links above."
             f"{frontier_note}"
         )
         return PlayContext(

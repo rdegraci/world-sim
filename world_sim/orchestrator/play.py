@@ -6,11 +6,12 @@ import re
 from dataclasses import dataclass
 
 from world_sim.authority import WorldAuthority
-from world_sim.config import MemorySettings, WorldExpansionSettings
+from world_sim.config import MemorySettings, RetrievalSettings, WorldExpansionSettings
 from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import WorldStore
 from world_sim.llm.base import ChatMessage, LLMAdapter
 from world_sim.lore.chroma_manager import ChromaManager
+from world_sim.lore.retrieval import RetrievalAssist
 from world_sim.models import AuthContext
 from world_sim.orchestrator.context_builder import ContextBuilder
 from world_sim.orchestrator.player_chat import (
@@ -50,6 +51,7 @@ class PlayOrchestrator:
         auth: AuthContext,
         expansion: WorldExpansionSettings | None = None,
         memory: MemorySettings | None = None,
+        retrieval: RetrievalSettings | None = None,
     ) -> None:
         # Play mutations always go through WorldAuthority (SQLite backend today).
         memory_settings = memory or MemorySettings()
@@ -66,10 +68,12 @@ class PlayOrchestrator:
         self.user_store = user_store
         self.auth = auth
         self.expansion = expansion or WorldExpansionSettings()
+        self.retrieval = RetrievalAssist(lore, retrieval or RetrievalSettings())
         self.context_builder = ContextBuilder(
             self.authority.store,
             lore,
             authority=self.authority,
+            retrieval=self.retrieval,
         )
         self.tools = PlayTools(
             self.authority,
@@ -141,6 +145,11 @@ class PlayOrchestrator:
         context = self.context_builder.build(
             self.auth.player_character.id,
             include_frontier_stubs=self.expansion.dynamic_expansion,
+            assist_query=(
+                action
+                if self.retrieval.enabled and self.retrieval.settings.play_context
+                else None
+            ),
         )
         messages = [
             ChatMessage(role="system", content=context.text),

@@ -26,6 +26,7 @@ from world_sim.builder.proposals import (
 from world_sim.builder.validation import ValidationResult, validate_world
 from world_sim.db.world_store import WorldStore
 from world_sim.builder.linking import collection_for_lore_key
+from world_sim.config import RetrievalSettings
 from world_sim.lore.chroma_manager import (
     ALL_COLLECTIONS,
     COLLECTION_ITEM,
@@ -34,6 +35,7 @@ from world_sim.lore.chroma_manager import (
     COLLECTION_SYSTEM,
     ChromaManager,
 )
+from world_sim.lore.retrieval import RetrievalAssist
 from world_sim.lore.seed import seed_starter_world
 
 _COLLECTION_ALIASES = {
@@ -58,11 +60,13 @@ class BuilderSession:
         data_dir: Path,
         *,
         seed_starter: bool = True,
+        retrieval: RetrievalSettings | None = None,
     ) -> None:
         self.world = world
         self.lore = lore
         self.data_dir = Path(data_dir)
         self.current_plan_id: str | None = None
+        self.retrieval = RetrievalAssist(lore, retrieval or RetrievalSettings())
         if seed_starter:
             seed_starter_world(world, lore)
 
@@ -162,7 +166,93 @@ class BuilderSession:
 
     def propose_from_brief(self, brief_path: str | Path) -> SeedPlan:
         plan = propose_from_brief(self.lore, self.world, str(brief_path))
+        self._annotate_retrieval_suggestions(plan)
         return self._persist(plan)
+
+    def discover_lore(self, query: str) -> str:
+        """Semantic discovery assist — grounded keys only for propose_*."""
+        return self.retrieval.format_builder_discovery(query)
+
+    def propose_discovered(
+        self,
+        query: str,
+        *,
+        kind: str,
+        place_in: str | None = None,
+    ) -> SeedPlan:
+        """Propose only from grounded retrieval hits (fail closed on ungrounded)."""
+        if not self.retrieval.enabled:
+            raise ValueError(
+                "Semantic retrieval is off. Set retrieval.enabled: true first."
+            )
+        kind_n = kind.strip().lower()
+        collection_map = {
+            "rooms": COLLECTION_ROOM,
+            "room": COLLECTION_ROOM,
+            "items": COLLECTION_ITEM,
+            "item": COLLECTION_ITEM,
+            "npcs": COLLECTION_NPC,
+            "npc": COLLECTION_NPC,
+        }
+        collection = collection_map.get(kind_n)
+        if collection is None:
+            raise ValueError("kind must be rooms, items, or npcs.")
+        keys = self.retrieval.grounded_keys(
+            query,
+            collections=(collection,),
+        )
+        if not keys:
+            plan = self.ensure_plan()
+            plan.gaps.append(
+                f"Retrieval found no grounded {kind_n} lore for {query!r} "
+                "(fail closed — nothing proposed)."
+            )
+            return self._persist(plan)
+        if collection == COLLECTION_ROOM:
+            return self.propose_rooms(keys)
+        if collection == COLLECTION_ITEM:
+            return self.propose_items(keys, place_in=place_in)
+        return self.propose_npcs(keys, current_room_id=place_in)
+
+    def _annotate_retrieval_suggestions(self, plan: SeedPlan) -> None:
+        if not self.retrieval.enabled or not self.retrieval.settings.builder_discover:
+            return
+        query_bits: list[str] = []
+        if plan.brief and isinstance(plan.brief, dict):
+            for field in ("goal", "tone", "title"):
+                value = plan.brief.get(field)
+                if value:
+                    query_bits.append(str(value))
+        query_bits.extend(
+            note for note in plan.notes if note.startswith("Goal:")
+        )
+        query = " ".join(query_bits).strip()
+        if not query:
+            return
+        keys = self.retrieval.grounded_keys(query)
+        already: set[str] = set()
+        for att in plan.attachments:
+            if isinstance(att, dict) and att.get("lore_key"):
+                already.add(str(att["lore_key"]))
+        for room in plan.rooms:
+            if isinstance(room, dict) and room.get("lore_key"):
+                already.add(str(room["lore_key"]))
+        for item in plan.items:
+            if isinstance(item, dict) and item.get("lore_key"):
+                already.add(str(item["lore_key"]))
+        for npc in plan.npcs:
+            if not isinstance(npc, dict):
+                continue
+            for key in npc.get("npc_lore") or []:
+                already.add(str(key))
+        suggestions = [
+            k for k in keys if k not in already
+        ][: self.retrieval.settings.top_k]
+        if suggestions:
+            plan.notes.append(
+                "[retrieval assist] related grounded lore keys (not auto-applied): "
+                + ", ".join(suggestions)
+            )
 
     def connect_rooms(self, from_room: str, direction: str, to_room: str) -> SeedPlan:
         plan = self.ensure_plan()

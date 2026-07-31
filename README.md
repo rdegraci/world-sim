@@ -22,6 +22,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Phase 3b: `world-sim-serve` multi-session WebSockets, in-room presence, public `say`, thin web + schematic map
 - Phase 4a: serial mutation queue, claim locks, exclusive Player Chat leases, private transcripts
 - Phase 4b1 (optional): bounded per-character / NPC-about-player memory (`memory.enabled`, default off)
+- Phase 4b2 (optional): semantic retrieval assist for Builder discovery / play context (`retrieval.enabled`, default off)
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
@@ -29,10 +30,9 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Nice web / admin web polish (Phase 3b+ / CLIENT-WEB Tier B)
 - Scale-out beyond small co-op (`docs/cache/SCALING.md`)
 - Broad CRUD / large-scale world editing beyond Builder + edit_mode
-- Semantic retrieval assist (Phase **4b2**, independently optional after 4a)
 - Player Chat inventory handoff / barter
 - Unsupervised Builder apply (Exp-007); dig-style room features (Exp-001)
-- Experiments Exp-001–008 (`docs/cache/EXPERIMENTAL.md`) — not part of 4b1
+- Experiments Exp-001–008 (`docs/cache/EXPERIMENTAL.md`) — not part of 4b1/4b2
 
 ## Project Structure
 
@@ -368,12 +368,18 @@ memory:
   max_per_subject: 20
   max_summary_chars: 280
   ttl_days: 0
+retrieval:
+  enabled: false
+  top_k: 5
+  play_context: true
+  builder_discover: true
 ```
 
 Supported providers: `grok` (default), `openai`, `anthropic`. Set the matching API key in `.env`.
 
-Phase **4b1** bounded memory stays off until `memory.enabled: true`. Records are runtime SQLite state (capped, private per character); they do not rewrite Chroma canon. Phase **4b2** semantic retrieval assist remains independently optional.
-Example `.env` secrets:
+Phase **4b1** bounded memory stays off until `memory.enabled: true`. Records are runtime SQLite state (capped, private per character); they do not rewrite Chroma canon.
+
+Phase **4b2** semantic retrieval stays off until `retrieval.enabled: true`. It may suggest related lore for Builder (`discover_lore` / `propose_discovered`) and optional play context assist — every hit is re-checked with `get_lore`; ungrounded keys are dropped. Authoritative facts still come from SQLite + explicit lore-keys.Example `.env` secrets:
 
 ```dotenv
 GROK_API_KEY=your_grok_api_key_here

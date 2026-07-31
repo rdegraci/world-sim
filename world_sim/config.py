@@ -36,6 +36,12 @@ memory:
   max_per_subject: 20
   max_summary_chars: 280
   ttl_days: 0
+# Phase 4b2 — optional semantic retrieval assist (default off)
+retrieval:
+  enabled: false
+  top_k: 5
+  play_context: true
+  builder_discover: true
 """
 
 DEFAULT_ENV_TEMPLATE = """\
@@ -83,6 +89,19 @@ class MemorySettings:
 
 
 @dataclass(frozen=True)
+class RetrievalSettings:
+    """Optional semantic retrieval assist (Phase 4b2). Default off.
+
+    Augments discovery/context only — never replaces lore-key + SQLite authority.
+    """
+
+    enabled: bool = False
+    top_k: int = 5
+    play_context: bool = True
+    builder_discover: bool = True
+
+
+@dataclass(frozen=True)
 class Settings:
     """Effective runtime settings after bootstrap and validation."""
 
@@ -96,6 +115,7 @@ class Settings:
     raw_config: dict[str, Any]
     world: WorldExpansionSettings = WorldExpansionSettings()
     memory: MemorySettings = MemorySettings()
+    retrieval: RetrievalSettings = RetrievalSettings()
 
 
 def resolve_paths(
@@ -252,6 +272,7 @@ def validate_and_build_settings(
 
     world_settings = parse_world_expansion_settings(raw_config)
     memory_settings = parse_memory_settings(raw_config)
+    retrieval_settings = parse_retrieval_settings(raw_config)
 
     return Settings(
         paths=paths,
@@ -264,6 +285,7 @@ def validate_and_build_settings(
         raw_config=raw_config,
         world=world_settings,
         memory=memory_settings,
+        retrieval=retrieval_settings,
     )
 
 
@@ -323,6 +345,38 @@ def parse_memory_settings(raw_config: dict[str, Any]) -> MemorySettings:
         max_per_subject=_int_field("max_per_subject", 20, minimum=1),
         max_summary_chars=_int_field("max_summary_chars", 280, minimum=1),
         ttl_days=_int_field("ttl_days", 0, minimum=0),
+    )
+
+
+def parse_retrieval_settings(raw_config: dict[str, Any]) -> RetrievalSettings:
+    """Parse retrieval.* settings; default keeps semantic assist off."""
+    section = raw_config.get("retrieval") or {}
+    if section is None:
+        section = {}
+    if not isinstance(section, dict):
+        raise ConfigError("config.yaml key 'retrieval' must be a mapping.")
+
+    enabled = bool(section.get("enabled", False))
+    play_context = section.get("play_context", True)
+    if play_context is None:
+        play_context = True
+    builder_discover = section.get("builder_discover", True)
+    if builder_discover is None:
+        builder_discover = True
+
+    top_k = section.get("top_k", 5)
+    try:
+        top_k_int = int(top_k)
+    except (TypeError, ValueError) as exc:
+        raise ConfigError("retrieval.top_k must be an integer.") from exc
+    if top_k_int < 1:
+        raise ConfigError("retrieval.top_k must be >= 1.")
+
+    return RetrievalSettings(
+        enabled=enabled,
+        top_k=top_k_int,
+        play_context=bool(play_context),
+        builder_discover=bool(builder_discover),
     )
 
 
