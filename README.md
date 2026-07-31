@@ -81,6 +81,8 @@ Runtime dependencies include `platformdirs`, `python-dotenv`, `PyYAML`, `chromad
 
 ## Usage
 
+Docs index: [`docs/README.md`](docs/README.md). Operator runbook: [`docs/OPERATOR.md`](docs/OPERATOR.md). World-authoring tutorial: [`docs/WORLD-AUTHORING.md`](docs/WORLD-AUTHORING.md). Per-command detail: [`docs/COMMAND-DETAILS.md`](docs/COMMAND-DETAILS.md). Design cache: [`docs/cache/README.md`](docs/cache/README.md).
+
 On first run, World-Sim creates platformdirs locations for the `world-sim` app, writes a default `config.yaml`, writes a `.env` template if missing, and initializes SQLite + Chroma storage.
 
 1. Install the package (`pip install -e .`).
