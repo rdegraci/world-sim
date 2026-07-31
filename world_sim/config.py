@@ -30,6 +30,12 @@ world:
   dynamic_expansion: false
   max_new_rooms_per_session: 5
   require_brief_or_stub: true
+# Phase 4b1 — optional bounded memory (default off)
+memory:
+  enabled: false
+  max_per_subject: 20
+  max_summary_chars: 280
+  ttl_days: 0
 """
 
 DEFAULT_ENV_TEMPLATE = """\
@@ -67,6 +73,16 @@ class WorldExpansionSettings:
 
 
 @dataclass(frozen=True)
+class MemorySettings:
+    """Optional bounded memory (Phase 4b1). Default off / empty-safe."""
+
+    enabled: bool = False
+    max_per_subject: int = 20
+    max_summary_chars: int = 280
+    ttl_days: int = 0  # 0 = no automatic expiry
+
+
+@dataclass(frozen=True)
 class Settings:
     """Effective runtime settings after bootstrap and validation."""
 
@@ -79,6 +95,7 @@ class Settings:
     admin_password: str | None
     raw_config: dict[str, Any]
     world: WorldExpansionSettings = WorldExpansionSettings()
+    memory: MemorySettings = MemorySettings()
 
 
 def resolve_paths(
@@ -234,6 +251,7 @@ def validate_and_build_settings(
         )
 
     world_settings = parse_world_expansion_settings(raw_config)
+    memory_settings = parse_memory_settings(raw_config)
 
     return Settings(
         paths=paths,
@@ -245,6 +263,7 @@ def validate_and_build_settings(
         admin_password=admin_password,
         raw_config=raw_config,
         world=world_settings,
+        memory=memory_settings,
     )
 
 
@@ -276,6 +295,34 @@ def parse_world_expansion_settings(raw_config: dict[str, Any]) -> WorldExpansion
         dynamic_expansion=dynamic,
         max_new_rooms_per_session=max_rooms_int,
         require_brief_or_stub=require_stub,
+    )
+
+
+def parse_memory_settings(raw_config: dict[str, Any]) -> MemorySettings:
+    """Parse memory.* settings; default keeps bounded memory off."""
+    section = raw_config.get("memory") or {}
+    if section is None:
+        section = {}
+    if not isinstance(section, dict):
+        raise ConfigError("config.yaml key 'memory' must be a mapping.")
+
+    enabled = bool(section.get("enabled", False))
+
+    def _int_field(name: str, default: int, *, minimum: int = 0) -> int:
+        raw = section.get(name, default)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError) as exc:
+            raise ConfigError(f"memory.{name} must be an integer.") from exc
+        if value < minimum:
+            raise ConfigError(f"memory.{name} must be >= {minimum}.")
+        return value
+
+    return MemorySettings(
+        enabled=enabled,
+        max_per_subject=_int_field("max_per_subject", 20, minimum=1),
+        max_summary_chars=_int_field("max_summary_chars", 280, minimum=1),
+        ttl_days=_int_field("ttl_days", 0, minimum=0),
     )
 
 

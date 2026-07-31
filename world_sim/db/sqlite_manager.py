@@ -180,6 +180,26 @@ CREATE TABLE IF NOT EXISTS runtime_events (
     payload_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
 );
+
+CREATE TABLE IF NOT EXISTS bounded_memories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    subject_kind TEXT NOT NULL CHECK (subject_kind IN ('player_character', 'npc')),
+    subject_id TEXT NOT NULL,
+    about_kind TEXT CHECK (
+        about_kind IS NULL
+        OR about_kind IN ('player_character', 'npc', 'room', 'item', 'world')
+    ),
+    about_id TEXT,
+    summary TEXT NOT NULL,
+    lore_key TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    expires_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_bounded_memories_subject
+    ON bounded_memories (subject_kind, subject_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_bounded_memories_about
+    ON bounded_memories (about_kind, about_id);
 """
 
 

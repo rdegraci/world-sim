@@ -97,6 +97,63 @@ PLAY_TOOLS: list[dict[str, Any]] = [
     },
 ]
 
+MEMORY_TOOLS: list[dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "record_memory",
+            "description": (
+                "Record a short bounded runtime memory for this player character. "
+                "Does not rewrite canon lore. Optional lore_key links only."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Short factual memory summary.",
+                    },
+                    "about_kind": {
+                        "type": "string",
+                        "description": "Optional: player_character, npc, room, item, world.",
+                    },
+                    "about_id": {
+                        "type": "string",
+                        "description": "Optional id matching about_kind.",
+                    },
+                    "lore_key": {
+                        "type": "string",
+                        "description": "Optional lore-key link (does not edit Chroma).",
+                    },
+                },
+                "required": ["summary"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "forget_memory",
+            "description": "Forget one of this character's bounded memories by id.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "memory_id": {"type": "integer"},
+                },
+                "required": ["memory_id"],
+            },
+        },
+    },
+]
+
+
+def play_tool_schemas(*, memory_enabled: bool = False) -> list[dict[str, Any]]:
+    """Play-mode tool schemas; memory tools only when config enables them."""
+    if not memory_enabled:
+        return list(PLAY_TOOLS)
+    return list(PLAY_TOOLS) + list(MEMORY_TOOLS)
+
+
 PLAYER_CHAT_TOOLS: list[dict[str, Any]] = [
     {
         "type": "function",

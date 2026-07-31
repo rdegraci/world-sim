@@ -329,12 +329,26 @@ class PlayerChatOrchestrator:
             f"Player inventory (read-only):\n"
             + "\n".join(inv_lines)
             + "\n\n"
-            "NPC inventory: (not modeled beyond presence; do not invent handoffs)\n"
+            + self._memory_context_block()
+            + "NPC inventory: (not modeled beyond presence; do not invent handoffs)\n"
             "Hard rules: do not mutate world/inventories/canon. "
             "Refuse unsupported player assertions of entities, exits, items, or NPCs. "
             "Use end_player_chat only to end the focused loop. "
             "Type end_chat is also handled by the runtime."
         )
+
+    def _memory_context_block(self) -> str:
+        from world_sim.authority import WorldAuthority
+
+        if not isinstance(self.world, WorldAuthority):
+            return ""
+        formatted = self.world.format_visible_memories(
+            self.auth.player_character.id,
+            npc_id=self.active_npc_id,
+        )
+        if not formatted:
+            return ""
+        return formatted + "\n\n"
 
     def _snapshot_world(self) -> tuple:
         pc = self.auth.player_character.id

@@ -25,8 +25,10 @@ from world_sim.authority.events import (
     TIME_ADVANCED,
     RuntimeEvent,
 )
+from world_sim.config import MemorySettings
 from world_sim.db.world_store import (
     ItemInstanceRecord,
+    MemoryRecord,
     Room,
     WorldStore,
 )
@@ -47,10 +49,12 @@ class WorldAuthority:
         *,
         bus: RuntimeEventBus | None = None,
         gate: MutationGate | None = None,
+        memory: MemorySettings | None = None,
     ) -> None:
         self._store = store
         self._bus = bus or RuntimeEventBus(store)
         self._gate = gate or MutationGate()
+        self._memory = memory or MemorySettings()
 
     @property
     def store(self) -> WorldStore:
@@ -64,6 +68,10 @@ class WorldAuthority:
     @property
     def gate(self) -> MutationGate:
         return self._gate
+
+    @property
+    def memory_settings(self) -> MemorySettings:
+        return self._memory
 
     @property
     def connection(self):  # noqa: ANN201 — mirrors WorldStore for rare callers
@@ -408,6 +416,221 @@ class WorldAuthority:
                 }
             )
         return busy
+
+    # --- Bounded memory (Phase 4b1; serial apply; no scene-public fan-out) ---
+
+    def remember(
+        self,
+        *,
+        actor_player_character_id: int,
+        summary: str,
+        subject_kind: str = "player_character",
+        subject_id: str | None = None,
+        about_kind: str | None = None,
+        about_id: str | None = None,
+        lore_key: str | None = None,
+    ) -> MemoryRecord:
+        """Record a bounded runtime memory for the acting character (or NPC about them).
+
+        Does not write Chroma or rewrite canon. ``lore_key`` is an optional link only.
+        Private — not emitted as a scene-public runtime event.
+        """
+
+        def _apply() -> MemoryRecord:
+            if not self._memory.enabled:
+                raise ValueError(
+                    "Bounded memory is off. Set memory.enabled: true in config.yaml."
+                )
+            cleaned = " ".join(str(summary).split()).strip()
+            if not cleaned:
+                raise ValueError("Remember what?")
+            if len(cleaned) > self._memory.max_summary_chars:
+                raise ValueError(
+                    f"Memory summary must be at most "
+                    f"{self._memory.max_summary_chars} characters."
+                )
+
+            kind = subject_kind.strip().lower()
+            if kind not in {"player_character", "npc"}:
+                raise ValueError("subject_kind must be player_character or npc.")
+
+            actor = str(actor_player_character_id)
+            resolved_about_kind = about_kind
+            resolved_about_id = about_id
+            if kind == "player_character":
+                resolved_subject = subject_id.strip() if subject_id else actor
+                if resolved_subject != actor:
+                    raise ValueError(
+                        "You can only record memory for your own character."
+                    )
+            else:
+                if not subject_id or not str(subject_id).strip():
+                    raise ValueError("NPC memory requires subject_id (npc_id).")
+                resolved_subject = str(subject_id).strip()
+                npc = self._store.get_npc(resolved_subject)
+                if npc is None:
+                    raise ValueError("That person is not known to the manor.")
+                # NPC memories written by a player must be about that player.
+                resolved_about_kind = (about_kind or "player_character").strip().lower()
+                resolved_about_id = (about_id or actor).strip()
+                if (
+                    resolved_about_kind != "player_character"
+                    or resolved_about_id != actor
+                ):
+                    raise ValueError(
+                        "You may only attach NPC memory that is about your character."
+                    )
+
+            if resolved_about_kind is not None:
+                resolved_about_kind = resolved_about_kind.strip().lower() or None
+            if resolved_about_id is not None:
+                resolved_about_id = str(resolved_about_id).strip() or None
+            if (resolved_about_kind is None) != (resolved_about_id is None):
+                raise ValueError("about_kind and about_id must be set together.")
+            if resolved_about_kind is not None and resolved_about_kind not in {
+                "player_character",
+                "npc",
+                "room",
+                "item",
+                "world",
+            }:
+                raise ValueError("Invalid about_kind.")
+
+            link = lore_key.strip() if lore_key else None
+            if link == "":
+                link = None
+
+            expires_at: str | None = None
+            if self._memory.ttl_days > 0:
+                expires_at = self._store.connection.execute(
+                    """
+                    SELECT strftime(
+                        '%Y-%m-%dT%H:%M:%fZ',
+                        'now',
+                        ?
+                    ) AS expires_at
+                    """,
+                    (f"+{self._memory.ttl_days} days",),
+                ).fetchone()["expires_at"]
+
+            record = self._store.insert_memory(
+                subject_kind=kind,
+                subject_id=resolved_subject,
+                summary=cleaned,
+                about_kind=resolved_about_kind,
+                about_id=resolved_about_id,
+                lore_key=link,
+                expires_at=expires_at,
+            )
+            self._store.trim_memories_for_subject(
+                kind,
+                resolved_subject,
+                keep=self._memory.max_per_subject,
+            )
+            # Re-fetch in case trim removed this row (should not if newest).
+            refreshed = self._store.get_memory(record.id)
+            if refreshed is None:
+                raise ValueError("Memory could not be retained under current caps.")
+            return refreshed
+
+        return self._gate.run_serial(_apply)
+
+    def forget_memory(
+        self,
+        memory_id: int,
+        *,
+        actor_player_character_id: int,
+    ) -> bool:
+        """Delete a memory the actor is allowed to see/own. Serial; no event fan-out."""
+
+        def _apply() -> bool:
+            if not self._memory.enabled:
+                raise ValueError(
+                    "Bounded memory is off. Set memory.enabled: true in config.yaml."
+                )
+            record = self._store.get_memory(memory_id)
+            if record is None:
+                return False
+            actor = str(actor_player_character_id)
+            owned_pc = (
+                record.subject_kind == "player_character"
+                and record.subject_id == actor
+            )
+            owned_npc_about = (
+                record.subject_kind == "npc"
+                and record.about_kind == "player_character"
+                and record.about_id == actor
+            )
+            if not (owned_pc or owned_npc_about):
+                raise ValueError("That memory is not yours to forget.")
+            return self._store.delete_memory(memory_id)
+
+        return self._gate.run_serial(_apply)
+
+    def list_visible_memories(
+        self,
+        viewer_player_character_id: int,
+        *,
+        npc_id: str | None = None,
+        limit: int = 20,
+    ) -> list[MemoryRecord]:
+        """Memories visible to one player — never another PC's private subject rows.
+
+        Always includes the viewer's own PC memories. When ``npc_id`` is set (Player
+        Chat), also includes that NPC's memories about the viewer.
+        """
+        if not self._memory.enabled:
+            return []
+        viewer = str(viewer_player_character_id)
+        own = self._store.list_memories_for_subject(
+            "player_character",
+            viewer,
+            limit=limit,
+        )
+        by_id = {m.id: m for m in own}
+        if npc_id:
+            for mem in self._store.list_npc_memories_about_player(
+                npc_id,
+                viewer_player_character_id,
+                limit=limit,
+            ):
+                by_id[mem.id] = mem
+        ordered = sorted(
+            by_id.values(),
+            key=lambda m: (m.created_at, m.id),
+            reverse=True,
+        )
+        return ordered[:limit]
+
+    def format_visible_memories(
+        self,
+        viewer_player_character_id: int,
+        *,
+        npc_id: str | None = None,
+        limit: int = 12,
+    ) -> str:
+        """Compact text block for LLM context, or empty string when disabled/none."""
+        memories = self.list_visible_memories(
+            viewer_player_character_id,
+            npc_id=npc_id,
+            limit=limit,
+        )
+        if not memories:
+            return ""
+        lines = []
+        for mem in memories:
+            about = ""
+            if mem.about_kind and mem.about_id:
+                about = f" about {mem.about_kind}:{mem.about_id}"
+            link = f" lore_key={mem.lore_key}" if mem.lore_key else ""
+            lines.append(
+                f"- #{mem.id} [{mem.subject_kind}:{mem.subject_id}]{about}{link}: "
+                f"{mem.summary}"
+            )
+        return (
+            "BOUNDED MEMORY (runtime only; not canon; do not invent extra memories)\n"
+            + "\n".join(lines)
+        )
 
     # --- Authoritative reads used by tools / presentation (delegate) ---
 

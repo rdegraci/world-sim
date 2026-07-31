@@ -21,6 +21,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Phase 3a: `WorldAuthority` port over play mutations + scene-public runtime event bus (map/presence substrate)
 - Phase 3b: `world-sim-serve` multi-session WebSockets, in-room presence, public `say`, thin web + schematic map
 - Phase 4a: serial mutation queue, claim locks, exclusive Player Chat leases, private transcripts
+- Phase 4b1 (optional): bounded per-character / NPC-about-player memory (`memory.enabled`, default off)
 - Providers: Grok (default), OpenAI, Anthropic; `WORLD_SIM_LLM=fake` for offline tests
 
 ### Deferred after MVP
@@ -28,9 +29,10 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Nice web / admin web polish (Phase 3b+ / CLIENT-WEB Tier B)
 - Scale-out beyond small co-op (`docs/cache/SCALING.md`)
 - Broad CRUD / large-scale world editing beyond Builder + edit_mode
-- Advanced memory and broad semantic retrieval
+- Semantic retrieval assist (Phase **4b2**, independently optional after 4a)
 - Player Chat inventory handoff / barter
 - Unsupervised Builder apply (Exp-007); dig-style room features (Exp-001)
+- Experiments Exp-001–008 (`docs/cache/EXPERIMENTAL.md`) — not part of 4b1
 
 ## Project Structure
 
@@ -361,10 +363,16 @@ world:
   dynamic_expansion: false
   max_new_rooms_per_session: 5
   require_brief_or_stub: true
+memory:
+  enabled: false
+  max_per_subject: 20
+  max_summary_chars: 280
+  ttl_days: 0
 ```
 
 Supported providers: `grok` (default), `openai`, `anthropic`. Set the matching API key in `.env`.
 
+Phase **4b1** bounded memory stays off until `memory.enabled: true`. Records are runtime SQLite state (capped, private per character); they do not rewrite Chroma canon. Phase **4b2** semantic retrieval assist remains independently optional.
 Example `.env` secrets:
 
 ```dotenv

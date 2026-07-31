@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass
 
 from world_sim.authority import WorldAuthority
-from world_sim.config import WorldExpansionSettings
+from world_sim.config import MemorySettings, WorldExpansionSettings
 from world_sim.db.user_store import UserStore
 from world_sim.db.world_store import WorldStore
 from world_sim.llm.base import ChatMessage, LLMAdapter
@@ -20,7 +20,7 @@ from world_sim.orchestrator.player_chat import (
 )
 from world_sim.orchestrator.presentation import present_room
 from world_sim.orchestrator.prompts import compose_play_system_prompt
-from world_sim.tools.definitions import PLAY_TOOLS
+from world_sim.tools.definitions import play_tool_schemas
 from world_sim.tools.implementations import PlayTools, normalize_direction
 from world_sim.utils.logger import get_logger
 
@@ -49,24 +49,34 @@ class PlayOrchestrator:
         user_store: UserStore,
         auth: AuthContext,
         expansion: WorldExpansionSettings | None = None,
+        memory: MemorySettings | None = None,
     ) -> None:
         # Play mutations always go through WorldAuthority (SQLite backend today).
+        memory_settings = memory or MemorySettings()
         if isinstance(world, WorldAuthority):
             self.authority = world
+            # Authority carries the effective memory config for this process.
+            self.memory = world.memory_settings
         else:
-            self.authority = WorldAuthority(world)
+            self.authority = WorldAuthority(world, memory=memory_settings)
+            self.memory = memory_settings
         self.world = self.authority
         self.lore = lore
         self.llm = llm
         self.user_store = user_store
         self.auth = auth
         self.expansion = expansion or WorldExpansionSettings()
-        self.context_builder = ContextBuilder(self.authority.store, lore)
+        self.context_builder = ContextBuilder(
+            self.authority.store,
+            lore,
+            authority=self.authority,
+        )
         self.tools = PlayTools(
             self.authority,
             lore,
             player_character_id=auth.player_character.id,
             expansion=self.expansion,
+            memory=self.memory,
         )
         self.system_prompt = compose_play_system_prompt()
         self.player_chat = PlayerChatOrchestrator(
@@ -146,7 +156,7 @@ class PlayOrchestrator:
             response = self.llm.complete(
                 system=self.system_prompt,
                 messages=messages,
-                tools=PLAY_TOOLS,
+                tools=play_tool_schemas(memory_enabled=self.memory.enabled),
             )
         except Exception as exc:
             self._logger.exception("LLM call failed: %s", exc)

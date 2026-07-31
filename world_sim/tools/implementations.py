@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 from world_sim.authority import MutationConflict, WorldAuthority
 from world_sim.builder.realize import RealizeError, realize_adjacent
-from world_sim.config import WorldExpansionSettings
+from world_sim.config import MemorySettings, WorldExpansionSettings
 from world_sim.db.world_store import WorldStore
 from world_sim.lore.chroma_manager import ChromaManager
 from world_sim.orchestrator.presentation import (
@@ -59,8 +59,15 @@ class PlayTools:
         *,
         player_character_id: int,
         expansion: WorldExpansionSettings | None = None,
+        memory: MemorySettings | None = None,
     ) -> None:
-        self.world = world if isinstance(world, WorldAuthority) else WorldAuthority(world)
+        memory_settings = memory or MemorySettings()
+        if isinstance(world, WorldAuthority):
+            self.world = world
+            self.memory = world.memory_settings
+        else:
+            self.world = WorldAuthority(world, memory=memory_settings)
+            self.memory = memory_settings
         self.lore = lore
         self.player_character_id = player_character_id
         self.expansion = expansion or WorldExpansionSettings()
@@ -72,6 +79,8 @@ class PlayTools:
             "examine_item": self.examine_item,
             "examine_npc": self.examine_npc,
             "advance_time": self.advance_time,
+            "record_memory": self.record_memory,
+            "forget_memory": self.forget_memory,
         }
 
     def execute(self, name: str, arguments: dict[str, Any]) -> ToolResult:
@@ -293,4 +302,55 @@ class PlayTools:
             ok=True,
             message=f"Time passes ({minutes} minutes). World clock: {total} minutes elapsed.",
             data={"minutes_elapsed": total},
+        )
+
+    def record_memory(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.memory.enabled:
+            return ToolResult(
+                ok=False,
+                message="You try to fix that detail in mind, but lasting memory is sealed here.",
+            )
+        summary = str(arguments.get("summary", "")).strip()
+        about_kind = arguments.get("about_kind")
+        about_id = arguments.get("about_id")
+        lore_key = arguments.get("lore_key")
+        try:
+            record = self.world.remember(
+                actor_player_character_id=self.player_character_id,
+                summary=summary,
+                about_kind=str(about_kind) if about_kind else None,
+                about_id=str(about_id) if about_id else None,
+                lore_key=str(lore_key) if lore_key else None,
+            )
+        except ValueError as exc:
+            return ToolResult(ok=False, message=str(exc))
+        return ToolResult(
+            ok=True,
+            message=f"You fix that in mind (memory #{record.id}).",
+            data={"memory_id": record.id},
+        )
+
+    def forget_memory(self, arguments: dict[str, Any]) -> ToolResult:
+        if not self.memory.enabled:
+            return ToolResult(
+                ok=False,
+                message="There is no lasting memory store open to clear.",
+            )
+        try:
+            memory_id = int(arguments.get("memory_id"))
+        except (TypeError, ValueError):
+            return ToolResult(ok=False, message="Forget which memory id?")
+        try:
+            deleted = self.world.forget_memory(
+                memory_id,
+                actor_player_character_id=self.player_character_id,
+            )
+        except ValueError as exc:
+            return ToolResult(ok=False, message=str(exc))
+        if not deleted:
+            return ToolResult(ok=False, message="That memory is already gone.")
+        return ToolResult(
+            ok=True,
+            message=f"You let memory #{memory_id} fade.",
+            data={"memory_id": memory_id},
         )

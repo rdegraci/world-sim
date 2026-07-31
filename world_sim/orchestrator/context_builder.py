@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from world_sim.db.world_store import WorldStore
 from world_sim.lore.chroma_manager import (
@@ -12,6 +13,9 @@ from world_sim.lore.chroma_manager import (
     ChromaManager,
 )
 from world_sim.lore.seed import SYSTEM_LORE_KEY
+
+if TYPE_CHECKING:
+    from world_sim.authority import WorldAuthority
 
 
 @dataclass(frozen=True)
@@ -28,9 +32,16 @@ class PlayContext:
 class ContextBuilder:
     """Resolve structured state, then attach canonical lore by explicit keys."""
 
-    def __init__(self, world: WorldStore, lore: ChromaManager) -> None:
+    def __init__(
+        self,
+        world: WorldStore,
+        lore: ChromaManager,
+        *,
+        authority: WorldAuthority | None = None,
+    ) -> None:
         self.world = world
         self.lore = lore
+        self.authority = authority
 
     def build(
         self,
@@ -104,6 +115,13 @@ class ContextBuilder:
                 " Pending frontier exits are valid move_player targets when listed; "
                 "do not narrate them as solid walls."
             )
+
+        memory_block = ""
+        if self.authority is not None:
+            formatted = self.authority.format_visible_memories(player_character_id)
+            if formatted:
+                memory_block = f"\n\n{formatted}"
+
         text = (
             "AUTHORITATIVE RUNTIME CONTEXT (SQLite first, then linked lore)\n"
             f"Player character id: {player_character_id}\n"
@@ -111,10 +129,12 @@ class ContextBuilder:
             f"System lore key={SYSTEM_LORE_KEY}\n"
             f"System lore:\n{system_lore or '(missing)'}\n\n"
             f"{room_block}\n\n"
-            f"Inventory:\n{inventory_summary}\n\n"
+            f"Inventory:\n{inventory_summary}"
+            f"{memory_block}\n\n"
             "Rules reminder: do not invent unsupported exits, items, or rooms. "
             "Use tools for movement, taking items, looking, examining, and time. "
-            "False player assertions must be refused in-character."
+            "False player assertions must be refused in-character. "
+            "Memory records are runtime state only — they do not rewrite canon lore."
             f"{frontier_note}"
         )
         return PlayContext(

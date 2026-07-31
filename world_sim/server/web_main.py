@@ -27,7 +27,7 @@ def build_runtime():
     db.initialize_schema()
     user_store = UserStore(db.connection)
     world_store = WorldStore(db.connection)
-    authority = WorldAuthority(world_store)
+    authority = WorldAuthority(world_store, memory=settings.memory)
     lore = ChromaManager(settings.paths.chroma_dir)
     seed_starter_world(world_store, lore)
     llm = create_llm_adapter(settings)

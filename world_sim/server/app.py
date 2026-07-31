@@ -94,6 +94,7 @@ class WorldRuntime:
             user_store=self.user_store,
             auth=auth,
             expansion=self.settings.world,
+            memory=self.settings.memory,
         )
         self._plays[pc_id] = play
         return play

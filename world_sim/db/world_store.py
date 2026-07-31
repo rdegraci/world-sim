@@ -53,6 +53,21 @@ class ItemInstanceRecord:
     name: str | None = None
 
 
+@dataclass(frozen=True)
+class MemoryRecord:
+    """Bounded runtime memory (Phase 4b1). Not canon lore."""
+
+    id: int
+    subject_kind: str
+    subject_id: str
+    about_kind: str | None
+    about_id: str | None
+    summary: str
+    lore_key: str | None
+    created_at: str
+    expires_at: str | None
+
+
 def derive_stable_recap(full_text: str, *, max_len: int = 180) -> str:
     """Derive a stable short recap from full canonical text once."""
     cleaned = " ".join(full_text.split())
@@ -973,6 +988,169 @@ class WorldStore:
             )
             for row in rows
         ]
+
+    # --- Bounded memory (Phase 4b1; runtime state, not canon) ---
+
+    def purge_expired_memories(self) -> int:
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                DELETE FROM bounded_memories
+                WHERE expires_at IS NOT NULL
+                  AND expires_at <= strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+                """
+            )
+            return int(cursor.rowcount)
+
+    def get_memory(self, memory_id: int) -> MemoryRecord | None:
+        self.purge_expired_memories()
+        row = self._connection.execute(
+            "SELECT * FROM bounded_memories WHERE id = ?",
+            (memory_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return self._memory_from_row(row)
+
+    def insert_memory(
+        self,
+        *,
+        subject_kind: str,
+        subject_id: str,
+        summary: str,
+        about_kind: str | None = None,
+        about_id: str | None = None,
+        lore_key: str | None = None,
+        expires_at: str | None = None,
+    ) -> MemoryRecord:
+        with self._connection:
+            cursor = self._connection.execute(
+                """
+                INSERT INTO bounded_memories (
+                    subject_kind, subject_id, about_kind, about_id,
+                    summary, lore_key, expires_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    subject_kind,
+                    subject_id,
+                    about_kind,
+                    about_id,
+                    summary,
+                    lore_key,
+                    expires_at,
+                ),
+            )
+            memory_id = int(cursor.lastrowid)
+        record = self.get_memory(memory_id)
+        assert record is not None
+        return record
+
+    def delete_memory(self, memory_id: int) -> bool:
+        with self._connection:
+            cursor = self._connection.execute(
+                "DELETE FROM bounded_memories WHERE id = ?",
+                (memory_id,),
+            )
+            return cursor.rowcount > 0
+
+    def count_memories_for_subject(self, subject_kind: str, subject_id: str) -> int:
+        self.purge_expired_memories()
+        row = self._connection.execute(
+            """
+            SELECT COUNT(*) AS n FROM bounded_memories
+            WHERE subject_kind = ? AND subject_id = ?
+            """,
+            (subject_kind, subject_id),
+        ).fetchone()
+        return int(row["n"]) if row else 0
+
+    def trim_memories_for_subject(
+        self,
+        subject_kind: str,
+        subject_id: str,
+        *,
+        keep: int,
+    ) -> int:
+        """Delete oldest memories beyond ``keep``. Returns rows deleted."""
+        if keep < 0:
+            raise ValueError("keep must be >= 0")
+        self.purge_expired_memories()
+        rows = self._connection.execute(
+            """
+            SELECT id FROM bounded_memories
+            WHERE subject_kind = ? AND subject_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (subject_kind, subject_id),
+        ).fetchall()
+        excess = len(rows) - keep
+        if excess <= 0:
+            return 0
+        to_delete = [int(row["id"]) for row in rows[:excess]]
+        with self._connection:
+            self._connection.executemany(
+                "DELETE FROM bounded_memories WHERE id = ?",
+                [(memory_id,) for memory_id in to_delete],
+            )
+        return excess
+
+    def list_memories_for_subject(
+        self,
+        subject_kind: str,
+        subject_id: str,
+        *,
+        limit: int = 50,
+    ) -> list[MemoryRecord]:
+        self.purge_expired_memories()
+        rows = self._connection.execute(
+            """
+            SELECT * FROM bounded_memories
+            WHERE subject_kind = ? AND subject_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (subject_kind, subject_id, limit),
+        ).fetchall()
+        return [self._memory_from_row(row) for row in rows]
+
+    def list_npc_memories_about_player(
+        self,
+        npc_id: str,
+        player_character_id: int,
+        *,
+        limit: int = 50,
+    ) -> list[MemoryRecord]:
+        """NPC-subject memories tagged about a specific player character."""
+        self.purge_expired_memories()
+        rows = self._connection.execute(
+            """
+            SELECT * FROM bounded_memories
+            WHERE subject_kind = 'npc'
+              AND subject_id = ?
+              AND about_kind = 'player_character'
+              AND about_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (npc_id, str(player_character_id), limit),
+        ).fetchall()
+        return [self._memory_from_row(row) for row in rows]
+
+    @staticmethod
+    def _memory_from_row(row: object) -> MemoryRecord:
+        return MemoryRecord(
+            id=int(row["id"]),  # type: ignore[index]
+            subject_kind=str(row["subject_kind"]),  # type: ignore[index]
+            subject_id=str(row["subject_id"]),  # type: ignore[index]
+            about_kind=row["about_kind"],  # type: ignore[index]
+            about_id=row["about_id"],  # type: ignore[index]
+            summary=str(row["summary"]),  # type: ignore[index]
+            lore_key=row["lore_key"],  # type: ignore[index]
+            created_at=str(row["created_at"]),  # type: ignore[index]
+            expires_at=row["expires_at"],  # type: ignore[index]
+        )
 
     @staticmethod
     def _stub_from_row(row: object) -> FrontierStub:

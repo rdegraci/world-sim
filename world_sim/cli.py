@@ -33,7 +33,7 @@ def run_app(settings: Settings) -> int:
         db.initialize_schema()
         store = UserStore(db.connection)
         world_store = WorldStore(db.connection)
-        authority = WorldAuthority(world_store)
+        authority = WorldAuthority(world_store, memory=settings.memory)
         drafts = DraftStore(db.connection)
         lore = ChromaManager(settings.paths.chroma_dir)
         seeded = seed_starter_world(world_store, lore)
@@ -74,6 +74,7 @@ def run_app(settings: Settings) -> int:
             user_store=store,
             auth=auth,
             expansion=settings.world,
+            memory=settings.memory,
         )
         edit = EditOrchestrator(
             world=world_store,
