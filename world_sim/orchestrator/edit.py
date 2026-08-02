@@ -57,6 +57,9 @@ edit_mode commands (admin only):
     view_npc <npc_id>
     add_npc_lore <npc_id> | <text...>
     edit_npc_lore <npc_id> | <text...>   (alias of add_npc_lore; write or replace)
+    create_npc_lore <npc_id> <prompt...>
+    revise_npc_lore <npc_id> <prompt...>
+    append_npc_lore <npc_id> <prompt...>   (alias of revise_npc_lore)
     add_npc <npc_id> | <name> | <lore_key>[,<lore_key>...] [--in <room>]
     create_npc <prompt...>
     edit_npc <npc_id> | name=<new name>
@@ -69,19 +72,22 @@ edit_mode commands (admin only):
     reject_draft <id>
 
 Notes:
-  - create_* stores a pending draft only; approve_draft makes it canonical.
+  - create_* / revise_npc_lore store a pending draft only; approve_draft makes it canonical.
+  - revise_npc_lore keeps existing primary description and folds in the prompt (append_npc_lore alias).
+  - create_npc_lore may rewrite more freely; still grounded on current lore.
   - add_*_lore / edit_*_lore write or replace Chroma text (explicit admin upsert; no draft).
   - edit_npc renames the SQLite record only; use edit_npc_lore / add_npc_lore for lore text.
   - Canon edits invalidate recap + full-description-seen for affected entities.
   - Bulk rooms/links/placements stay in world-builder.
 """
 
-# edit_*_lore aliases rewrite to add_*_lore (same upsert semantics).
+# Command aliases rewrite to a canonical verb so parsers and handlers stay shared.
 _LORE_WRITE_ALIASES: tuple[tuple[str, str], ...] = (
     ("edit_system_lore", "add_system_lore"),
     ("edit_room_lore", "add_room_lore"),
     ("edit_item_lore", "add_item_lore"),
     ("edit_npc_lore", "add_npc_lore"),
+    ("append_npc_lore", "revise_npc_lore"),
 )
 
 
@@ -131,7 +137,7 @@ class EditOrchestrator:
         if lowered in {"help", "edit help", "?"}:
             return EditResult(message=EDIT_HELP)
 
-        raw = self._canonicalize_lore_write_alias(raw)
+        raw = self._canonicalize_command_alias(raw)
         lowered = raw.lower()
 
         if lowered.startswith("list_system_lore"):
@@ -186,11 +192,15 @@ class EditOrchestrator:
             return self._view_npc(raw)
         if lowered.startswith("add_npc_lore"):
             return self._add_npc_lore(raw)
+        if lowered.startswith("create_npc_lore"):
+            return self._create_npc_lore(raw)
+        if lowered.startswith("revise_npc_lore"):
+            return self._revise_npc_lore(raw)
         if lowered.startswith("add_npc"):
             return self._add_npc(raw)
         if lowered.startswith("create_npc"):
             return self._create_npc(raw)
-        # edit_npc_lore already rewrote to add_npc_lore above.
+        # edit_npc_lore / append_npc_lore already rewrote above.
         if lowered.startswith("edit_npc"):
             return self._edit_npc(raw)
         if lowered.startswith("delete_npc"):
@@ -202,8 +212,8 @@ class EditOrchestrator:
         )
 
     @staticmethod
-    def _canonicalize_lore_write_alias(raw: str) -> str:
-        """Rewrite edit_*_lore to add_*_lore so parsers and handlers stay shared."""
+    def _canonicalize_command_alias(raw: str) -> str:
+        """Rewrite command aliases to canonical verbs so handlers stay shared."""
         lowered = raw.lower()
         for alias, canonical in _LORE_WRITE_ALIASES:
             if lowered.startswith(alias):
@@ -443,6 +453,90 @@ class EditOrchestrator:
             proposed_key=definition.lore_key,
             draft_text=draft_text,
             prompt=f"item_id={definition.item_id}|{prompt}",
+        )
+
+    def _create_npc_lore(self, raw: str) -> EditResult:
+        return self._npc_lore_llm_draft(raw, command="create_npc_lore", mode="replace")
+
+    def _revise_npc_lore(self, raw: str) -> EditResult:
+        return self._npc_lore_llm_draft(raw, command="revise_npc_lore", mode="revise")
+
+    def _npc_lore_llm_draft(
+        self,
+        raw: str,
+        *,
+        command: str,
+        mode: str,
+    ) -> EditResult:
+        body = raw[len(command) :].strip()
+        parts = body.split(maxsplit=1)
+        if len(parts) < 2:
+            return EditResult(
+                ok=False,
+                message=f"Usage: {command} <npc_id> <prompt...>",
+            )
+        npc_id, prompt = parts[0].strip(), parts[1].strip()
+        npc = self.world.get_npc(npc_id)
+        if npc is None:
+            return EditResult(
+                ok=False,
+                message=(
+                    f"NPC '{npc_id}' is not in SQLite. "
+                    "Use add_npc or create_npc (draft→approve), or seed via world-builder."
+                ),
+            )
+        primary_key = npc.npc_lore[0] if npc.npc_lore else f"npc:{npc.npc_id}:description"
+        current = self.lore.get_lore(COLLECTION_NPC, primary_key) or "(none)"
+        this_npc_bits = []
+        for key in npc.npc_lore:
+            text = self.lore.get_lore(COLLECTION_NPC, key)
+            if text is not None:
+                this_npc_bits.append(f"KEY: {key}\nTEXT: {text}")
+        this_npc_grounding = "\n\n".join(this_npc_bits) or "(no linked NPC lore)"
+        system_bits = self._grounding_block(COLLECTION_SYSTEM, limit=6)
+        npc_bits = self._grounding_block(COLLECTION_NPC, limit=8)
+        if mode == "revise":
+            instruction = (
+                "Revise a reviewable NPC lore draft grounded in system lore and "
+                "this NPC's lore.\n"
+                "Preserve the existing primary description; incorporate the admin "
+                "prompt as new detail.\n"
+                "Do not drop established facts unless the admin prompt explicitly "
+                "contradicts them.\n"
+                "Return only the full revised primary NPC description text. "
+                "Do not claim it is saved.\n"
+            )
+        else:
+            instruction = (
+                "Create a reviewable NPC lore draft grounded in system lore and "
+                "this NPC's lore.\n"
+                "Return only the replacement primary NPC description text. "
+                "Do not claim it is saved.\n"
+            )
+        user_message = (
+            f"{instruction}"
+            f"Target npc_id: {npc.npc_id}\n"
+            f"Target name: {npc.name}\n"
+            f"Target lore_key: {primary_key}\n"
+            f"Current primary NPC lore:\n{current}\n\n"
+            f"Admin prompt: {prompt}\n\n"
+            f"Existing system lore:\n{system_bits}\n\n"
+            f"This NPC's linked lore:\n{this_npc_grounding}\n\n"
+            f"Existing NPC lore (peers):\n{npc_bits}"
+        )
+        draft_text = self._generate_draft_text(user_message)
+        if isinstance(draft_text, EditResult):
+            return draft_text
+        stored = (
+            f"NPC_ID: {npc.npc_id}\n"
+            f"NAME: {npc.name}\n"
+            f"DESCRIPTION:\n{draft_text}"
+        )
+        return self._store_pending_draft(
+            collection_name=COLLECTION_NPC,
+            proposed_key=primary_key,
+            draft_text=stored,
+            prompt=f"npc_id={npc.npc_id}|{prompt}",
         )
 
     def _create_npc(self, raw: str) -> EditResult:

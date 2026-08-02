@@ -151,6 +151,9 @@ list_rooms
 list_room_lore search=foyer
 view_room_lore room:foyer:description
 create_item_lore brass_key Emphasize a scratched numeral
+create_npc_lore mrs_hale Soften her voice; note ink-stained fingers
+revise_npc_lore mrs_hale She keeps a copper thimble in her pocket
+append_npc_lore mrs_hale She dislikes the cellar door left ajar
 create_npc A gardener who tends the courtyard pots
 approve_draft 2
 add_npc gardener | Gardener | npc:gardener:description --in foyer
@@ -403,6 +406,9 @@ Write or delete Chroma text and update SQLite (lore-key refs, drafts, presentati
 | `delete_item_lore <key>` | Delete if no definition still links the key |
 | `add_npc_lore <npc_id> \| <text>` | Rewrite primary NPC lore; update record; invalidate presentation |
 | `edit_npc_lore …` | Alias of `add_npc_lore` (write or replace) |
+| `create_npc_lore <npc_id> <prompt>` | LLM primary NPC lore draft (NPC must exist; freer rewrite; pending) |
+| `revise_npc_lore <npc_id> <prompt>` | LLM draft: keep existing primary lore, fold in prompt (pending) |
+| `append_npc_lore …` | Alias of `revise_npc_lore` |
 | `create_npc <prompt>` | LLM NPC draft (pending) |
 | `list_drafts` | List pending/reviewed drafts (SQLite) |
 | `view_draft <id>` | Show draft body |

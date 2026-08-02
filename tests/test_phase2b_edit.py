@@ -160,6 +160,97 @@ def test_create_npc_approve_creates_record(
     assert lore.get_lore(COLLECTION_NPC, draft.proposed_key) is not None
 
 
+def test_create_npc_lore_requires_approve_and_invalidates(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, drafts, lore = runtime
+    auth = _admin_auth(user_store, world)
+    pc = auth.player_character.id
+    present_npc(world, lore, player_character_id=pc, npc_id="mrs_hale")
+    seen, recap = world.get_npc_presentation(pc, "mrs_hale")
+    assert seen is True
+    assert recap is not None
+
+    edit = _edit(runtime, auth)
+    missing = edit.handle("create_npc_lore nobody Soften her voice")
+    assert not missing.ok
+    assert "not in SQLite" in missing.message
+
+    created = edit.handle(
+        "create_npc_lore mrs_hale Soften her voice; mention a navy shawl clasp"
+    )
+    assert created.ok
+    assert "NOT canonical" in created.message
+    draft = drafts.list_drafts(status="pending")[0]
+    assert draft.collection_name == COLLECTION_NPC
+    assert draft.proposed_key == "npc:mrs_hale:description"
+    assert "NPC_ID: mrs_hale" in draft.draft_text
+    assert "NAME: Mrs. Hale" in draft.draft_text
+    before = lore.get_lore(COLLECTION_NPC, "npc:mrs_hale:description")
+    assert before is not None
+    assert "navy shawl clasp" not in before.lower()
+
+    approved = edit.handle(f"approve_draft {draft.id}")
+    assert approved.ok
+    assert "invalidated" in approved.message.lower()
+    after = lore.get_lore(COLLECTION_NPC, "npc:mrs_hale:description")
+    assert after is not None
+    assert after != before
+    assert "navy shawl clasp" in after.lower()
+    npc = world.get_npc("mrs_hale")
+    assert npc is not None
+    assert npc.name == "Mrs. Hale"
+    assert npc.current_room_id == "study"
+
+    seen_after, recap_after = world.get_npc_presentation(pc, "mrs_hale")
+    assert seen_after is False
+    assert recap_after is None
+
+
+def test_revise_npc_lore_preserves_existing_and_append_alias(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, drafts, lore = runtime
+    auth = _admin_auth(user_store, world)
+    pc = auth.player_character.id
+    present_npc(world, lore, player_character_id=pc, npc_id="mrs_hale")
+    before = lore.get_lore(COLLECTION_NPC, "npc:mrs_hale:description")
+    assert before is not None
+    assert before.strip()
+
+    edit = _edit(runtime, auth)
+    created = edit.handle(
+        "append_npc_lore mrs_hale She keeps a copper thimble in her pocket"
+    )
+    assert created.ok
+    assert "NOT canonical" in created.message
+    draft = drafts.list_drafts(status="pending")[0]
+    assert draft.collection_name == COLLECTION_NPC
+    assert draft.proposed_key == "npc:mrs_hale:description"
+    assert "NPC_ID: mrs_hale" in draft.draft_text
+    assert before in draft.draft_text
+    assert "copper thimble" in draft.draft_text.lower()
+    assert lore.get_lore(COLLECTION_NPC, "npc:mrs_hale:description") == before
+
+    approved = edit.handle(f"approve_draft {draft.id}")
+    assert approved.ok
+    after = lore.get_lore(COLLECTION_NPC, "npc:mrs_hale:description")
+    assert after is not None
+    assert before in after
+    assert "copper thimble" in after.lower()
+    seen_after, recap_after = world.get_npc_presentation(pc, "mrs_hale")
+    assert seen_after is False
+    assert recap_after is None
+
+    created_revise = edit.handle(
+        "revise_npc_lore mrs_hale She dislikes the cellar door left ajar"
+    )
+    assert created_revise.ok
+    draft2 = drafts.list_drafts(status="pending")[0]
+    assert "cellar door" in draft2.draft_text.lower()
+    assert "copper thimble" in draft2.draft_text.lower()
+
+
 def test_list_filters_and_entity_lists(
     runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
 ) -> None:

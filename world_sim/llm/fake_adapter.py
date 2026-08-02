@@ -87,6 +87,38 @@ class FakeAdapter:
                 tool_calls=[],
             )
 
+        if "Revise a reviewable NPC lore draft" in content:
+            prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
+            prompt_text = prompt_match.group(1).strip() if prompt_match else content
+            current_match = re.search(
+                r"Current primary NPC lore:\n(.*?)\n\nAdmin prompt:",
+                content,
+                flags=re.DOTALL,
+            )
+            current = current_match.group(1).strip() if current_match else ""
+            if current and current != "(none)":
+                text = f"{current} Additionally: {prompt_text}"
+            else:
+                text = (
+                    f"Revised NPC lore incorporating: {prompt_text}. "
+                    "Awaits explicit admin approval."
+                )
+            return LLMResponse(text=text, tool_calls=[])
+
+        if "Create a reviewable NPC lore draft" in content:
+            prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
+            prompt_text = prompt_match.group(1).strip() if prompt_match else content
+            key_match = re.search(r"Target lore_key:\s*(\S+)", content)
+            key = key_match.group(1) if key_match else "npc:unknown:description"
+            return LLMResponse(
+                text=(
+                    f"Revised NPC lore for {key}: {prompt_text}. "
+                    "The figure stays consistent with Quiet Manor system lore "
+                    "and awaits explicit admin approval."
+                ),
+                tool_calls=[],
+            )
+
         if "Create a reviewable NPC draft" in content:
             prompt_match = re.search(r"Admin prompt:\s*(.+)", content)
             prompt_text = prompt_match.group(1).strip() if prompt_match else "new npc"

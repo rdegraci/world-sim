@@ -15,7 +15,7 @@ Slices 1–5 are implemented. Phase 1 MVP platform is complete.
 - Seeded Quiet Manor + Mrs. Hale NPC
 - Grounded `play_mode`, admin `edit_mode`, admin sandboxed `chat_mode`
 - World Builder companion: propose / preview / validate / apply (+ `propose_from_brief`)
-- Richer admin `edit_mode`: `create_room_lore` / `create_item_lore` / `create_npc` drafts, list filters, delete guards
+- Richer admin `edit_mode`: `create_room_lore` / `create_item_lore` / `create_npc_lore` / `revise_npc_lore` (`append_npc_lore`) / `create_npc` drafts, list filters, delete guards
 - Focused in-play Player Chat (`talk to <npc>` / `end_chat`) — conversation-only
 - Optional dynamic frontier expansion (`world.dynamic_expansion`, default off) with campaign identity
 - Phase 3a: `WorldAuthority` port over play mutations + scene-public runtime event bus (map/presence substrate)
@@ -159,6 +159,8 @@ Other Phase 2b edit paths:
 ```text
 mode edit
 create_item_lore brass_key Emphasize a scratched numeral
+create_npc_lore mrs_hale Soften her voice; note ink-stained fingers
+revise_npc_lore mrs_hale She keeps a copper thimble in her pocket
 create_npc A gardener who tends the courtyard pots
 approve_draft 2
 add_npc gardener | Gardener | npc:gardener:description --in foyer

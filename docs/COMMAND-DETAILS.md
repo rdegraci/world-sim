@@ -690,7 +690,48 @@ add_npc_lore mrs_hale | Mrs. Hale is tidy and watchful, with silver hair and a c
 edit_npc_lore mrs_hale | Mrs. Hale is tidy and watchful, with silver hair and a charcoal cardigan.
 ```
 
-#### 3.3.11 `create_npc`
+#### 3.3.11 `create_npc_lore`
+
+**What it does:** Pending LLM draft that replaces the **primary** lore text for an existing NPC. Grounded on system lore and that NPC’s linked lore. Freer rewrite than `revise_npc_lore`. Not live until `approve_draft`. Does not create NPCs.
+
+**Parameters:**
+
+| Name | Required | Meaning |
+|------|----------|---------|
+| `npc_id` | yes | Existing NPC |
+| `prompt` | yes | Draft instruction |
+
+**Example:**
+
+```text
+create_npc_lore mrs_hale Soften her voice; note ink-stained fingers
+```
+
+**Notes:** Keeps the NPC’s id, display name, room, and condition. Only the primary description text is rewritten on approve (same key `add_npc_lore` updates).
+
+#### 3.3.12 `revise_npc_lore` / `append_npc_lore`
+
+**What it does:** Pending LLM draft that **keeps** the existing primary NPC description and folds in the admin prompt as new detail. Grounded on system lore and that NPC’s linked lore. Not live until `approve_draft`. Does not create NPCs or add a second lore key.
+
+**Alias:** `append_npc_lore` is identical to `revise_npc_lore`. `revise_npc_lore` is the canonical spelling.
+
+**Parameters:**
+
+| Name | Required | Meaning |
+|------|----------|---------|
+| `npc_id` | yes | Existing NPC |
+| `prompt` | yes | Detail to incorporate |
+
+**Example:**
+
+```text
+revise_npc_lore mrs_hale She keeps a copper thimble in her pocket
+append_npc_lore mrs_hale She dislikes the cellar door left ajar
+```
+
+**Notes:** Still stores one full primary description (merge/revise, not a Chroma append). Prefer this when building an NPC slowly; use `create_npc_lore` when a freer rewrite is fine.
+
+#### 3.3.13 `create_npc`
 
 **What it does:** Pending LLM draft for a new NPC (lore + record fields). Not live until `approve_draft`.
 
@@ -706,7 +747,7 @@ edit_npc_lore mrs_hale | Mrs. Hale is tidy and watchful, with silver hair and a 
 create_npc A gardener who tends the courtyard pots
 ```
 
-#### 3.3.12 `list_drafts`
+#### 3.3.14 `list_drafts`
 
 **What it does:** Lists **pending** lore drafts in SQLite (`id`, collection, key, status).
 
@@ -714,7 +755,7 @@ create_npc A gardener who tends the courtyard pots
 
 **Notes:** Only pending drafts appear. Approved or rejected drafts are not listed here.
 
-#### 3.3.13 `view_draft`
+#### 3.3.15 `view_draft`
 
 **What it does:** Shows one draft’s full body and metadata.
 
@@ -730,7 +771,7 @@ create_npc A gardener who tends the courtyard pots
 view_draft 1
 ```
 
-#### 3.3.14 `approve_draft`
+#### 3.3.16 `approve_draft`
 
 **What it does:** Commits a pending draft to Chroma. May create/update NPC rows and lore-key refs. Invalidates presentation for affected entities.
 
@@ -746,7 +787,7 @@ view_draft 1
 approve_draft 1
 ```
 
-#### 3.3.15 `reject_draft`
+#### 3.3.17 `reject_draft`
 
 **What it does:** Marks a draft rejected. Does not write canon lore.
 
