@@ -17,13 +17,14 @@ from world_sim.lore.chroma_manager import (
     ChromaManager,
 )
 from world_sim.models import AuthContext
+from world_sim.orchestrator.edit_help import resolve_edit_command_help
 from world_sim.orchestrator.presentation import npc_canonical_description
 from world_sim.orchestrator.prompts import compose_edit_system_prompt
 from world_sim.utils.logger import get_logger
 
 EDIT_HELP = """\
 edit_mode commands (admin only):
-  help
+  help [command]            Full list, or per-command help with examples
   mode play                 Leave edit_mode and return to play_mode
 
   System lore:
@@ -134,8 +135,9 @@ class EditOrchestrator:
             return EditResult(ok=False, message="Empty edit command.")
 
         lowered = raw.lower()
-        if lowered in {"help", "edit help", "?"}:
-            return EditResult(message=EDIT_HELP)
+        help_result = self._parse_help(raw, lowered)
+        if help_result is not None:
+            return help_result
 
         raw = self._canonicalize_command_alias(raw)
         lowered = raw.lower()
@@ -210,6 +212,30 @@ class EditOrchestrator:
             ok=False,
             message="Unknown edit_mode command. Type 'help' for the constrained command set.",
         )
+
+    @staticmethod
+    def _parse_help(raw: str, lowered: str) -> EditResult | None:
+        if lowered in {"help", "edit help", "?"}:
+            return EditResult(message=EDIT_HELP)
+        topic: str | None = None
+        if lowered.startswith("help "):
+            topic = raw.strip()[5:].strip()
+        elif lowered.startswith("? ") and len(raw.strip()) > 2:
+            topic = raw.strip()[2:].strip()
+        if topic is None:
+            return None
+        if not topic:
+            return EditResult(message=EDIT_HELP)
+        body = resolve_edit_command_help(topic)
+        if body is None:
+            return EditResult(
+                ok=False,
+                message=(
+                    f"Unknown edit command '{topic}'. "
+                    "Type 'help' for the full list."
+                ),
+            )
+        return EditResult(message=body)
 
     @staticmethod
     def _canonicalize_command_alias(raw: str) -> str:

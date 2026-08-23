@@ -271,3 +271,49 @@ def test_list_room_and_item_lore(
     assert "room:foyer" in rooms.message
     items = edit.handle("list_item_lore search=journal")
     assert "item:worn_journal" in items.message
+
+
+def test_edit_help_per_command_includes_examples(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, _ = runtime
+    auth = _admin_auth(user_store, world)
+    edit = _edit(runtime, auth)
+    result = edit.handle("help add_npc")
+    assert result.ok
+    assert "Examples:" in result.message
+    assert "add_npc jane | Jane | npc:jane:description --in study" in result.message
+
+
+def test_edit_help_unknown_command(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, _ = runtime
+    auth = _admin_auth(user_store, world)
+    edit = _edit(runtime, auth)
+    result = edit.handle("help frobnicate")
+    assert not result.ok
+    assert "Unknown edit command" in result.message
+
+
+def test_edit_help_alias_resolves(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, _ = runtime
+    auth = _admin_auth(user_store, world)
+    edit = _edit(runtime, auth)
+    result = edit.handle("help edit_npc_lore")
+    assert result.ok
+    assert "alias of add_npc_lore" in result.message
+    assert "Examples:" in result.message
+
+
+def test_edit_help_topic_drafts(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, _ = runtime
+    auth = _admin_auth(user_store, world)
+    edit = _edit(runtime, auth)
+    result = edit.handle("? approve_draft")
+    assert result.ok
+    assert "approve_draft 3" in result.message
