@@ -1,11 +1,11 @@
-"""Admin-only sandboxed chat_mode for one configured NPC."""
+"""Admin-only sandboxed chat_mode for testing any NPC by id."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
 from world_sim.db.user_store import UserStore
-from world_sim.db.world_store import WorldStore
+from world_sim.db.world_store import NpcRecord, WorldStore
 from world_sim.llm.base import ChatMessage, LLMAdapter
 from world_sim.lore.chroma_manager import COLLECTION_NPC, ChromaManager
 from world_sim.lore.seed import DEFAULT_CHAT_NPC_ID
@@ -18,9 +18,10 @@ CHAT_HELP = """\
 chat_mode commands (admin only, sandboxed):
   help
   mode play / mode edit     Leave chat_mode
-  who                       Show the configured chat NPC identity
+  who                       Show the active chat NPC identity
+  npc <npc_id>              Switch sandbox chat to another NPC by id
 
-Any other line is spoken to the configured NPC.
+Any other line is spoken to the active NPC.
 chat_mode reads canon but does not mutate world state, inventories, or lore.
 """
 
@@ -65,15 +66,57 @@ class ChatOrchestrator:
                 f"chat_mode configured NPC '{self.npc_id}' is missing from SQLite. "
                 "Seed or create the NPC record before chatting."
             )
-        description = npc_canonical_description(self.world, self.lore, npc.npc_id)
         self._logger.info(
             "Entering chat_mode npc_id=%s session_id=%s (sandbox, no mutations)",
             npc.npc_id,
             self.auth.session.id,
         )
+        return self._active_npc_message(npc, switched=False)
+
+    def switch_npc(self, npc_id: str) -> ChatTurnResult:
+        """Switch sandbox chat to another NPC. Clears in-session transcript."""
+        self.assert_admin()
+        target = npc_id.strip()
+        if not target:
+            return ChatTurnResult(ok=False, message="Usage: npc <npc_id>")
+        if target == self.npc_id:
+            current = self.world.get_npc(self.npc_id)
+            name = current.name if current is not None else self.npc_id
+            return ChatTurnResult(
+                message=f"Already chatting with {name} ({self.npc_id})."
+            )
+        npc = self.world.get_npc(target)
+        if npc is None:
+            return ChatTurnResult(
+                ok=False,
+                message=(
+                    f"NPC '{target}' not found in SQLite. "
+                    "Use a valid npc_id from list_npcs (edit_mode) or world-builder."
+                ),
+            )
+        self._history.clear()
+        previous = self.npc_id
+        self.npc_id = target
+        self._logger.info(
+            "chat_mode switched npc_id %s -> %s session_id=%s",
+            previous,
+            target,
+            self.auth.session.id,
+        )
+        return ChatTurnResult(message=self._active_npc_message(npc, switched=True))
+
+    def _active_npc_message(self, npc: NpcRecord, *, switched: bool = False) -> str:
+        description = npc_canonical_description(self.world, self.lore, npc.npc_id)
+        prefix = (
+            f"Now chatting with {npc.name} ({npc.npc_id}). Sandbox — no world writes."
+            if switched
+            else (
+                f"chat_mode sandbox with {npc.name} ({npc.npc_id}).\n"
+                "This mode is non-canonical: replies do not mutate world/canon/inventories."
+            )
+        )
         return (
-            f"chat_mode sandbox with {npc.name} ({npc.npc_id}).\n"
-            "This mode is non-canonical: replies do not mutate world/canon/inventories.\n"
+            f"{prefix}\n"
             f"Current room (read-only context): {npc.current_room_id or 'unplaced'}\n\n"
             f"{description}"
         )
@@ -109,13 +152,18 @@ class ChatOrchestrator:
         if text.lower() in {"who", "whoami"}:
             npc = self.world.get_npc(self.npc_id)
             if npc is None:
-                return ChatTurnResult(ok=False, message="Configured NPC missing.")
+                return ChatTurnResult(ok=False, message="Active NPC missing.")
             return ChatTurnResult(
                 message=(
                     f"npc_id={npc.npc_id} name={npc.name} "
                     f"room={npc.current_room_id} lore_keys={npc.npc_lore}"
                 )
             )
+        lowered = text.lower()
+        if lowered == "npc":
+            return ChatTurnResult(ok=False, message="Usage: npc <npc_id>")
+        if lowered.startswith("npc "):
+            return self.switch_npc(text[4:])
 
         # Snapshot mutable world facts before the call to prove no mutation.
         before_npc = self.world.get_npc(self.npc_id)

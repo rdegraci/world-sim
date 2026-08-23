@@ -62,6 +62,7 @@ _ADMIN_COMMANDS: tuple[str, ...] = (
     "list_system_lore",
     "look",
     "mode",
+    "npc",
     "open_plan",
     "place_item",
     "place_npc",

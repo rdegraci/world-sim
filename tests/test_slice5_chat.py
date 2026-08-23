@@ -228,6 +228,114 @@ def test_chat_mode_does_not_mutate_world(
     assert world.get_room("hidden_elevator") is None
 
 
+def _seed_jane(world: WorldStore, lore: ChromaManager) -> None:
+    lore.upsert_lore(
+        COLLECTION_NPC,
+        "npc:jane:description",
+        "Jane is calm and observant, with careful eyes.",
+    )
+    world.upsert_npc(
+        "jane",
+        "Jane",
+        npc_lore=["npc:jane:description"],
+        current_room_id="study",
+    )
+
+
+def test_chat_mode_switch_npc(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, lore = runtime
+    _seed_jane(world, lore)
+    auth = _admin_auth(user_store, world)
+    chat = ChatOrchestrator(
+        world=world,
+        lore=lore,
+        llm=FakeAdapter(),
+        user_store=user_store,
+        auth=auth,
+    )
+    chat.handle("Hello there.")
+    assert len(chat._history) == 2
+
+    switched = chat.switch_npc("jane")
+    assert switched.ok
+    assert "Now chatting with Jane (jane)" in switched.message
+    assert chat.npc_id == "jane"
+    assert chat._history == []
+
+    who = chat.handle("who")
+    assert who.ok
+    assert "npc_id=jane" in who.message
+    assert "name=Jane" in who.message
+
+    reply = chat.handle("Good evening.")
+    assert reply.ok
+    assert len(chat._history) == 2
+
+
+def test_chat_mode_switch_missing_npc(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, lore = runtime
+    auth = _admin_auth(user_store, world)
+    chat = ChatOrchestrator(
+        world=world,
+        lore=lore,
+        llm=FakeAdapter(),
+        user_store=user_store,
+        auth=auth,
+    )
+    result = chat.handle("npc nobody_here")
+    assert not result.ok
+    assert "not found" in result.message.lower()
+    assert chat.npc_id == DEFAULT_CHAT_NPC_ID
+
+
+def test_chat_mode_switch_same_npc(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, lore = runtime
+    auth = _admin_auth(user_store, world)
+    chat = ChatOrchestrator(
+        world=world,
+        lore=lore,
+        llm=FakeAdapter(),
+        user_store=user_store,
+        auth=auth,
+    )
+    result = chat.handle(f"npc {DEFAULT_CHAT_NPC_ID}")
+    assert result.ok
+    assert "Already chatting with Mrs. Hale" in result.message
+
+
+def test_session_chat_mode_npc_switch(
+    runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
+) -> None:
+    user_store, world, _, lore = runtime
+    _seed_jane(world, lore)
+    auth = _admin_auth(user_store, world)
+    chat = ChatOrchestrator(
+        world=world,
+        lore=lore,
+        llm=FakeAdapter(),
+        user_store=user_store,
+        auth=auth,
+    )
+    outputs: list[str] = []
+    inputs = iter(["mode chat", "npc jane", "who", "quit"])
+    code = run_session(
+        auth=auth,
+        store=user_store,
+        chat=chat,
+        input_fn=lambda _: next(inputs),
+        output_fn=outputs.append,
+    )
+    assert code == 0
+    assert any("Now chatting with Jane (jane)" in line for line in outputs)
+    assert any("npc_id=jane" in line for line in outputs)
+
+
 def test_examine_npc_in_play(
     runtime: tuple[UserStore, WorldStore, DraftStore, ChromaManager],
 ) -> None:
