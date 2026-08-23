@@ -6,6 +6,7 @@ import shlex
 import sys
 from pathlib import Path
 
+from world_sim.cli_input import prompt_line
 from world_sim.builder.apply import ApplyError
 from world_sim.builder.brief import BriefError
 from world_sim.builder.core import BuilderSession
@@ -71,15 +72,15 @@ def run_builder(settings: Settings) -> int:
             "Draft plans only until apply_seed_plan."
         )
         print("Type 'help' for commands.")
-        return _repl(session)
+        return _repl(session, history_dir=settings.paths.data_dir)
     finally:
         db.close()
 
 
-def _repl(session: BuilderSession) -> int:
+def _repl(session: BuilderSession, *, history_dir: Path | None = None) -> int:
     while True:
         try:
-            raw = input("> ").strip()
+            raw = prompt_line("> ", kind="admin", history_dir=history_dir).strip()
         except EOFError:
             print()
             return 0
@@ -101,7 +102,7 @@ def _repl(session: BuilderSession) -> int:
             print(HELP_TEXT)
             continue
         try:
-            message = dispatch(session, command, args)
+            message = dispatch(session, command, args, history_dir=history_dir)
         except (ApplyError, BriefError, FileNotFoundError, ValueError) as exc:
             print(f"Error: {exc}")
             continue
@@ -109,7 +110,13 @@ def _repl(session: BuilderSession) -> int:
             print(message)
 
 
-def dispatch(session: BuilderSession, command: str, args: list[str]) -> str:
+def dispatch(
+    session: BuilderSession,
+    command: str,
+    args: list[str],
+    *,
+    history_dir: Path | None = None,
+) -> str:
     if command == "list_lore":
         collection = args[0] if args else None
         rows = session.list_lore(collection)
@@ -298,7 +305,11 @@ def dispatch(session: BuilderSession, command: str, args: list[str]) -> str:
             raise ValueError("No plan to apply.")
         if not yes:
             print(session.preview(target))
-            confirm = input("Type 'apply' to commit this plan to SQLite: ").strip()
+            confirm = prompt_line(
+                "Type 'apply' to commit this plan to SQLite: ",
+                kind="admin",
+                history_dir=history_dir,
+            ).strip()
             if confirm != "apply":
                 return "Apply cancelled. Plan remains a draft."
         plan = session.apply(target)

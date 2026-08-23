@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
+from pathlib import Path
 
+from world_sim.cli_input import InputKind, prompt_line
 from world_sim.db.user_store import UserStore
 from world_sim.models import AuthContext
 from world_sim.orchestrator.chat import ChatAccessError, ChatOrchestrator
@@ -44,6 +46,20 @@ def _mode_prompt(mode: str, *, in_player_chat: bool = False) -> str:
     return "> "
 
 
+def _read_line(
+    *,
+    mode: str,
+    in_player_chat: bool,
+    input_fn: InputFn | None,
+    history_dir: Path | None,
+) -> str:
+    prompt = _mode_prompt(mode, in_player_chat=in_player_chat)
+    if input_fn is not None:
+        return input_fn(prompt)
+    kind: InputKind = "admin" if mode in {"edit", "chat"} else "play"
+    return prompt_line(prompt, kind=kind, history_dir=history_dir)
+
+
 def run_session(
     *,
     auth: AuthContext | None = None,
@@ -51,7 +67,8 @@ def run_session(
     play: PlayOrchestrator | None = None,
     edit: EditOrchestrator | None = None,
     chat: ChatOrchestrator | None = None,
-    input_fn: InputFn = input,
+    input_fn: InputFn | None = None,
+    history_dir: Path | None = None,
     output_fn: OutputFn = print,
 ) -> int:
     """Run the local CLI session shell until the user exits.
@@ -99,7 +116,12 @@ def run_session(
         while True:
             try:
                 in_player_chat = bool(play is not None and play.in_player_chat)
-                raw = input_fn(_mode_prompt(mode, in_player_chat=in_player_chat))
+                raw = _read_line(
+                    mode=mode,
+                    in_player_chat=in_player_chat,
+                    input_fn=input_fn,
+                    history_dir=history_dir,
+                )
             except EOFError:
                 output_fn("")
                 output_fn("Goodbye.")

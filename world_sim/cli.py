@@ -102,7 +102,14 @@ def run_app(settings: Settings) -> int:
             world_store.get_player_room_id(auth.player_character.id),
             chat_npc_id,
         )
-        return run_session(auth=auth, store=store, play=play, edit=edit, chat=chat)
+        return run_session(
+            auth=auth,
+            store=store,
+            play=play,
+            edit=edit,
+            chat=chat,
+            history_dir=settings.paths.data_dir,
+        )
     finally:
         db.close()
 
